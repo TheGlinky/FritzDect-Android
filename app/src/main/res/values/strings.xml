@@ -1,4 +1,4 @@
-app/src/main/res/values/strings.xml<resources>
+<resources>
     <string name="app_name">THEGLINKY FRITZ!DECT</string>
     <string name="setup_title">FRITZ!Box Setup</string>
     <string name="ip_label">FRITZ!Box IP</string>
