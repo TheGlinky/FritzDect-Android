@@ -63,11 +63,12 @@ fun FritzDectApp(viewModel: FritzViewModel) {
     val isConnected by viewModel.isConnected.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
 
-    // Sobald verbunden, automatisch zum Devices-Screen wechseln
+    var wasConnected by remember { mutableStateOf(false) }
     LaunchedEffect(isConnected) {
-        if (isConnected) {
+        if (isConnected && !wasConnected) {
             currentScreen = Screen.Devices
         }
+        wasConnected = isConnected
     }
 
     Column(
