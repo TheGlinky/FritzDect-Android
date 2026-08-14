@@ -1,3 +1,4 @@
+                
 package com.theglinky.fritzdect
 
 import android.util.Log
@@ -7,14 +8,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.xmlpull.v1.XmlPullParser
 import org.xmlpull.v1.XmlPullParserFactory
 import java.io.StringReader
-import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
-import kotlin.math.pow
 
 data class FritzDevice(
     val deviceId: String,
@@ -57,16 +58,12 @@ class FritzViewModel : ViewModel() {
 
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                // Get Session ID
                 sessionId = getSessionId()
                 Log.d("FritzViewModel", "Connected with sessionId: $sessionId")
 
                 _isConnected.emit(true)
 
-                // Load Devices
                 loadDevices()
-
-                // Start polling (every 2 seconds for live updates)
                 startPolling()
             } catch (e: Exception) {
                 Log.e("FritzViewModel", "Connection failed", e)
@@ -77,20 +74,19 @@ class FritzViewModel : ViewModel() {
 
     private suspend fun getSessionId(): String {
         return try {
+            val mediaType = "text/xml".toMediaType()
+            val requestBody = buildGetSessionXML().toRequestBody(mediaType)
+
             val request = Request.Builder()
                 .url("http://$fritzBoxIP:49000/upnp/control/deviceconfig")
-                .post(okhttp3.RequestBody.create(
-                    okhttp3.MediaType.parse("text/xml"),
-                    buildGetSessionXML()
-                ))
+                .post(requestBody)
                 .addHeader("SOAPAction", "urn:dslforum-org:service:DeviceConfig:1#GetSessionID")
                 .addHeader("Content-Type", "text/xml; charset=\"utf-8\"")
                 .build()
 
             val response = httpClient.newCall(request).execute()
-            val body = response.body()?.string() ?: ""
+            val body = response.body?.string() ?: ""
 
-            // Parse SessionID from response
             val parser = XmlPullParserFactory.newInstance().newPullParser()
             parser.setInput(StringReader(body))
 
@@ -112,39 +108,32 @@ class FritzViewModel : ViewModel() {
     }
 
     private suspend fun loadDevices() {
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val request = Request.Builder()
-                    .url("http://$fritzBoxIP:49000/upnp/control/homeautomation")
-                    .post(okhttp3.RequestBody.create(
-                        okhttp3.MediaType.parse("text/xml"),
-                        buildGetDeviceListXML()
-                    ))
-                    .addHeader("SOAPAction", "urn:dslforum-org:service:DeviceConfig:1#GetDeviceListPath")
-                    .build()
+        try {
+            val mediaType = "text/xml".toMediaType()
+            val requestBody = buildGetDeviceListXML().toRequestBody(mediaType)
 
-                val response = httpClient.newCall(request).execute()
-                val body = response.body()?.string() ?: ""
+            val request = Request.Builder()
+                .url("http://$fritzBoxIP:49000/upnp/control/homeautomation")
+                .post(requestBody)
+                .addHeader("SOAPAction", "urn:dslforum-org:service:DeviceConfig:1#GetDeviceListPath")
+                .build()
 
-                val devices = parseDevices(body)
-                _devices.emit(devices)
+            val response = httpClient.newCall(request).execute()
+            val body = response.body?.string() ?: ""
 
-                Log.d("FritzViewModel", "Loaded ${devices.size} devices")
-            } catch (e: Exception) {
-                Log.e("FritzViewModel", "loadDevices failed", e)
-            }
+            val devices = parseDevices(body)
+            _devices.emit(devices)
+
+            Log.d("FritzViewModel", "Loaded ${devices.size} devices")
+        } catch (e: Exception) {
+            Log.e("FritzViewModel", "loadDevices failed", e)
         }
     }
 
     private fun parseDevices(xmlResponse: String): List<FritzDevice> {
-        // This is a simplified parser - in production you'd use a proper XML library
         val devices = mutableListOf<FritzDevice>()
 
-        // Mock: Fetch and parse actual FRITZ!Box XML response
-        // For now, return example devices
         try {
-            // In real implementation, parse the actual device list from FRITZ!Box
-            // This would involve parsing DeviceListPath response and calling GetDeviceListURL
             Log.d("FritzViewModel", "Parsing devices from response")
         } catch (e: Exception) {
             Log.e("FritzViewModel", "Parse error", e)
@@ -154,25 +143,22 @@ class FritzViewModel : ViewModel() {
     }
 
     suspend fun toggleDevice(deviceId: String, turnOn: Boolean) {
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val request = Request.Builder()
-                    .url("http://$fritzBoxIP:49000/upnp/control/homeautomation")
-                    .post(okhttp3.RequestBody.create(
-                        okhttp3.MediaType.parse("text/xml"),
-                        buildToggleXML(deviceId, turnOn)
-                    ))
-                    .addHeader("SOAPAction", "urn:dslforum-org:service:DeviceConfig:1#SetSwitch")
-                    .build()
+        try {
+            val mediaType = "text/xml".toMediaType()
+            val requestBody = buildToggleXML(deviceId, turnOn).toRequestBody(mediaType)
 
-                val response = httpClient.newCall(request).execute()
-                Log.d("FritzViewModel", "Toggle response: ${response.code()}")
+            val request = Request.Builder()
+                .url("http://$fritzBoxIP:49000/upnp/control/homeautomation")
+                .post(requestBody)
+                .addHeader("SOAPAction", "urn:dslforum-org:service:DeviceConfig:1#SetSwitch")
+                .build()
 
-                // Update UI immediately for instant feedback
-                updateDeviceState(deviceId, turnOn)
-            } catch (e: Exception) {
-                Log.e("FritzViewModel", "toggleDevice failed", e)
-            }
+            val response = httpClient.newCall(request).execute()
+            Log.d("FritzViewModel", "Toggle response: ${response.code}")
+
+            updateDeviceState(deviceId, turnOn)
+        } catch (e: Exception) {
+            Log.e("FritzViewModel", "toggleDevice failed", e)
         }
     }
 
@@ -181,16 +167,13 @@ class FritzViewModel : ViewModel() {
             try {
                 timerConfigs[deviceId] = TimerConfig(deviceId, onMinutes, pauseHours, isRepeat)
 
-                // Turn ON immediately
                 toggleDevice(deviceId, true)
 
-                // Calculate timing
                 val onSeconds = onMinutes * 60L
                 val pauseSeconds = pauseHours * 3600L
 
                 Log.d("FritzViewModel", "Timer set: ON for $onMinutes min, PAUSE for $pauseHours hours")
 
-                // Simplified timer loop (in production, use proper scheduler)
                 if (isRepeat) {
                     while (true) {
                         kotlinx.coroutines.delay(onSeconds * 1000)
@@ -223,7 +206,7 @@ class FritzViewModel : ViewModel() {
             while (true) {
                 try {
                     loadDevices()
-                    kotlinx.coroutines.delay(2000) // Poll every 2 seconds
+                    kotlinx.coroutines.delay(2000)
                 } catch (e: Exception) {
                     Log.e("FritzViewModel", "Polling error", e)
                 }
@@ -231,7 +214,6 @@ class FritzViewModel : ViewModel() {
         }
     }
 
-    // FRITZ!Box SOAP XML Builders
     private fun buildGetSessionXML(): String {
         return """<?xml version="1.0" encoding="utf-8"?>
 <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">
