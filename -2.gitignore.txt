@@ -1,0 +1,55 @@
+# Gradle files
+.gradle/
+build/
+*.apk
+*.aar
+*.ap_
+*.aab
+
+# Local configuration file
+local.properties
+
+# Proguard files
+proguard/
+*.pro
+
+# Log files
+*.log
+
+# Android Studio
+.idea/
+*.iml
+*.iws
+*.ipr
+.DS_Store
+
+# IntelliJ
+out/
+
+# keystore files
+*.jks
+*.keystore
+
+# External native build
+.cxx/
+.externalNativeBuild/
+
+# Version control
+.git/
+.gitignore
+*.swp
+*.swo
+
+# Editor backup files
+*~
+.~*
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Node
+node_modules/
+package-lock.json
+yarn.lock
