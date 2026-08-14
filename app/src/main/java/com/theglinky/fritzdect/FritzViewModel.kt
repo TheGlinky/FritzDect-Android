@@ -1,4 +1,3 @@
-                
 package com.theglinky.fritzdect
 
 import android.util.Log
@@ -8,6 +7,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import okhttp3.Credentials
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -19,6 +19,7 @@ import java.util.concurrent.TimeUnit
 
 data class FritzDevice(
     val deviceId: String,
+    val ain: String,
     val name: String,
     val isOn: Boolean,
     val power: Int = 0,
@@ -41,9 +42,12 @@ class FritzViewModel : ViewModel() {
     private val _isConnected = MutableStateFlow(false)
     val isConnected: StateFlow<Boolean> = _isConnected
 
+    private val _errorMessage = MutableStateFlow("")
+    val errorMessage: StateFlow<String> = _errorMessage
+
     private var fritzBoxIP = ""
+    private var fritzUser = ""
     private var fritzPassword = ""
-    private var sessionId = ""
 
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
@@ -51,140 +55,188 @@ class FritzViewModel : ViewModel() {
         .build()
 
     private val timerConfigs = mutableMapOf<String, TimerConfig>()
+    private var pollingJob: kotlinx.coroutines.Job? = null
 
-    fun connectToFritzBox(ip: String, password: String) {
+    fun connectToFritzBox(ip: String, password: String, user: String = "") {
         fritzBoxIP = ip
         fritzPassword = password
+        fritzUser = user
 
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                sessionId = getSessionId()
-                Log.d("FritzViewModel", "Connected with sessionId: $sessionId")
-
+                _errorMessage.emit("")
+                // Test connection by fetching device list
+                val devices = fetchDeviceList()
+                _devices.emit(devices)
                 _isConnected.emit(true)
 
-                loadDevices()
+                Log.d("FritzViewModel", "Connected, found ${devices.size} devices")
+
                 startPolling()
             } catch (e: Exception) {
                 Log.e("FritzViewModel", "Connection failed", e)
                 _isConnected.emit(false)
+                _errorMessage.emit(e.message ?: "Connection failed")
             }
         }
     }
 
-    private suspend fun getSessionId(): String {
-        return try {
-            val mediaType = "text/xml".toMediaType()
-            val requestBody = buildGetSessionXML().toRequestBody(mediaType)
-
-            val request = Request.Builder()
-                .url("http://$fritzBoxIP:49000/upnp/control/deviceconfig")
-                .post(requestBody)
-                .addHeader("SOAPAction", "urn:dslforum-org:service:DeviceConfig:1#GetSessionID")
-                .addHeader("Content-Type", "text/xml; charset=\"utf-8\"")
-                .build()
-
-            val response = httpClient.newCall(request).execute()
-            val body = response.body?.string() ?: ""
-
-            val parser = XmlPullParserFactory.newInstance().newPullParser()
-            parser.setInput(StringReader(body))
-
-            var sessionId = ""
-            var eventType = parser.eventType
-            while (eventType != XmlPullParser.END_DOCUMENT) {
-                if (eventType == XmlPullParser.START_TAG && parser.name == "SessionID") {
-                    sessionId = parser.nextText()
-                    break
-                }
-                eventType = parser.next()
-            }
-
-            sessionId
-        } catch (e: Exception) {
-            Log.e("FritzViewModel", "getSessionId failed", e)
-            ""
-        }
+    /**
+     * Uses the FRITZ!Box HomeAutomation Switch API (webservices/homeautoswitch.lua)
+     * This is the simple HTTP API AVM provides - much easier than full TR-064 SOAP
+     */
+    private fun buildAuthHeader(): String? {
+        return if (fritzUser.isNotEmpty() && fritzPassword.isNotEmpty()) {
+            Credentials.basic(fritzUser, fritzPassword)
+        } else null
     }
 
-    private suspend fun loadDevices() {
-        try {
-            val mediaType = "text/xml".toMediaType()
-            val requestBody = buildGetDeviceListXML().toRequestBody(mediaType)
+    private suspend fun fetchDeviceList(): List<FritzDevice> {
+        val url = "http://$fritzBoxIP/webservices/homeautoswitch.lua?switchcmd=getdevicelistinfos"
 
-            val request = Request.Builder()
-                .url("http://$fritzBoxIP:49000/upnp/control/homeautomation")
-                .post(requestBody)
-                .addHeader("SOAPAction", "urn:dslforum-org:service:DeviceConfig:1#GetDeviceListPath")
-                .build()
+        val requestBuilder = Request.Builder().url(url)
+        buildAuthHeader()?.let { requestBuilder.addHeader("Authorization", it) }
 
-            val response = httpClient.newCall(request).execute()
-            val body = response.body?.string() ?: ""
+        val response = httpClient.newCall(requestBuilder.build()).execute()
 
-            val devices = parseDevices(body)
-            _devices.emit(devices)
-
-            Log.d("FritzViewModel", "Loaded ${devices.size} devices")
-        } catch (e: Exception) {
-            Log.e("FritzViewModel", "loadDevices failed", e)
+        if (!response.isSuccessful) {
+            throw Exception("HTTP ${response.code}: Konnte FRITZ!Box nicht erreichen. Prüfe IP und ob 'Anmeldung im Heimnetz ohne Kennwort' bzw. dein FRITZ!Box-Passwort korrekt ist.")
         }
+
+        val xml = response.body?.string() ?: throw Exception("Leere Antwort von FRITZ!Box")
+        return parseDeviceListXml(xml)
     }
 
-    private fun parseDevices(xmlResponse: String): List<FritzDevice> {
+    private fun parseDeviceListXml(xml: String): List<FritzDevice> {
         val devices = mutableListOf<FritzDevice>()
+        val parser = XmlPullParserFactory.newInstance().newPullParser()
+        parser.setInput(StringReader(xml))
 
-        try {
-            Log.d("FritzViewModel", "Parsing devices from response")
-        } catch (e: Exception) {
-            Log.e("FritzViewModel", "Parse error", e)
+        var eventType = parser.eventType
+        var currentAin = ""
+        var currentName = ""
+        var currentSwitchState = false
+        var currentPower = 0
+        var currentTemp = 0
+        var insideDevice = false
+        var insideName = false
+        var insideSwitchState = false
+        var insidePower = false
+        var insideTemperature = false
+        var insideSwitch = false
+        var insidePowermeter = false
+        var insideTemperatureBlock = false
+
+        while (eventType != XmlPullParser.END_DOCUMENT) {
+            when (eventType) {
+                XmlPullParser.START_TAG -> {
+                    when (parser.name) {
+                        "device" -> {
+                            insideDevice = true
+                            currentAin = parser.getAttributeValue(null, "identifier") ?: ""
+                            currentName = ""
+                            currentSwitchState = false
+                            currentPower = 0
+                            currentTemp = 0
+                        }
+                        "name" -> if (insideDevice) insideName = true
+                        "switch" -> insideSwitch = true
+                        "state" -> if (insideSwitch) insideSwitchState = true
+                        "powermeter" -> insidePowermeter = true
+                        "power" -> if (insidePowermeter) insidePower = true
+                        "temperature" -> insideTemperatureBlock = true
+                        "celsius" -> if (insideTemperatureBlock) insideTemperature = true
+                    }
+                }
+                XmlPullParser.TEXT -> {
+                    val text = parser.text?.trim() ?: ""
+                    if (text.isNotEmpty()) {
+                        when {
+                            insideName -> currentName = text
+                            insideSwitchState -> currentSwitchState = text == "1"
+                            insidePower -> currentPower = (text.toIntOrNull() ?: 0) / 1000 // mW -> W
+                            insideTemperature -> currentTemp = (text.toIntOrNull() ?: 0) / 10 // 0.1°C -> °C
+                        }
+                    }
+                }
+                XmlPullParser.END_TAG -> {
+                    when (parser.name) {
+                        "device" -> {
+                            if (insideDevice && currentAin.isNotEmpty()) {
+                                devices.add(
+                                    FritzDevice(
+                                        deviceId = currentAin,
+                                        ain = currentAin,
+                                        name = currentName.ifEmpty { "Steckdose $currentAin" },
+                                        isOn = currentSwitchState,
+                                        power = currentPower,
+                                        temperature = currentTemp
+                                    )
+                                )
+                            }
+                            insideDevice = false
+                        }
+                        "name" -> insideName = false
+                        "switch" -> insideSwitch = false
+                        "state" -> insideSwitchState = false
+                        "powermeter" -> insidePowermeter = false
+                        "power" -> insidePower = false
+                        "temperature" -> insideTemperatureBlock = false
+                        "celsius" -> insideTemperature = false
+                    }
+                }
+            }
+            eventType = parser.next()
         }
 
         return devices
     }
 
-    suspend fun toggleDevice(deviceId: String, turnOn: Boolean) {
+    suspend fun toggleDevice(ain: String, turnOn: Boolean) {
         try {
-            val mediaType = "text/xml".toMediaType()
-            val requestBody = buildToggleXML(deviceId, turnOn).toRequestBody(mediaType)
+            val cmd = if (turnOn) "setswitchon" else "setswitchoff"
+            val url = "http://$fritzBoxIP/webservices/homeautoswitch.lua?switchcmd=$cmd&ain=$ain"
 
-            val request = Request.Builder()
-                .url("http://$fritzBoxIP:49000/upnp/control/homeautomation")
-                .post(requestBody)
-                .addHeader("SOAPAction", "urn:dslforum-org:service:DeviceConfig:1#SetSwitch")
-                .build()
+            val requestBuilder = Request.Builder().url(url)
+            buildAuthHeader()?.let { requestBuilder.addHeader("Authorization", it) }
 
-            val response = httpClient.newCall(request).execute()
+            val response = httpClient.newCall(requestBuilder.build()).execute()
             Log.d("FritzViewModel", "Toggle response: ${response.code}")
 
-            updateDeviceState(deviceId, turnOn)
+            // Instant UI feedback
+            updateDeviceState(ain, turnOn)
         } catch (e: Exception) {
             Log.e("FritzViewModel", "toggleDevice failed", e)
+            _errorMessage.emit("Schalten fehlgeschlagen: ${e.message}")
         }
     }
 
-    suspend fun setTimer(deviceId: String, onMinutes: Int, pauseHours: Int, isRepeat: Boolean) {
+    fun setTimer(ain: String, onMinutes: Int, pauseHours: Int, isRepeat: Boolean) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                timerConfigs[deviceId] = TimerConfig(deviceId, onMinutes, pauseHours, isRepeat)
+                timerConfigs[ain] = TimerConfig(ain, onMinutes, pauseHours, isRepeat)
 
-                toggleDevice(deviceId, true)
+                toggleDevice(ain, true)
 
-                val onSeconds = onMinutes * 60L
-                val pauseSeconds = pauseHours * 3600L
+                val onMillis = onMinutes * 60L * 1000L
+                val pauseMillis = pauseHours * 3600L * 1000L
 
-                Log.d("FritzViewModel", "Timer set: ON for $onMinutes min, PAUSE for $pauseHours hours")
+                Log.d("FritzViewModel", "Timer set: ON for $onMinutes min, PAUSE for $pauseHours hours, repeat=$isRepeat")
 
                 if (isRepeat) {
-                    while (true) {
-                        kotlinx.coroutines.delay(onSeconds * 1000)
-                        toggleDevice(deviceId, false)
+                    while (timerConfigs[ain] != null) {
+                        kotlinx.coroutines.delay(onMillis)
+                        if (timerConfigs[ain] == null) break
+                        toggleDevice(ain, false)
 
-                        kotlinx.coroutines.delay(pauseSeconds * 1000)
-                        toggleDevice(deviceId, true)
+                        kotlinx.coroutines.delay(pauseMillis)
+                        if (timerConfigs[ain] == null) break
+                        toggleDevice(ain, true)
                     }
                 } else {
-                    kotlinx.coroutines.delay(onSeconds * 1000)
-                    toggleDevice(deviceId, false)
+                    kotlinx.coroutines.delay(onMillis)
+                    toggleDevice(ain, false)
+                    timerConfigs.remove(ain)
                 }
             } catch (e: Exception) {
                 Log.e("FritzViewModel", "setTimer failed", e)
@@ -192,9 +244,13 @@ class FritzViewModel : ViewModel() {
         }
     }
 
-    private suspend fun updateDeviceState(deviceId: String, isOn: Boolean) {
+    fun cancelTimer(ain: String) {
+        timerConfigs.remove(ain)
+    }
+
+    private suspend fun updateDeviceState(ain: String, isOn: Boolean) {
         val currentDevices = _devices.value.toMutableList()
-        val index = currentDevices.indexOfFirst { it.deviceId == deviceId }
+        val index = currentDevices.indexOfFirst { it.ain == ain }
         if (index >= 0) {
             currentDevices[index] = currentDevices[index].copy(isOn = isOn)
             _devices.emit(currentDevices)
@@ -202,49 +258,23 @@ class FritzViewModel : ViewModel() {
     }
 
     private fun startPolling() {
-        viewModelScope.launch(Dispatchers.IO) {
+        pollingJob?.cancel()
+        pollingJob = viewModelScope.launch(Dispatchers.IO) {
             while (true) {
                 try {
-                    loadDevices()
-                    kotlinx.coroutines.delay(2000)
+                    kotlinx.coroutines.delay(3000)
+                    val devices = fetchDeviceList()
+                    _devices.emit(devices)
                 } catch (e: Exception) {
                     Log.e("FritzViewModel", "Polling error", e)
+                    // Don't kill polling on transient errors
                 }
             }
         }
     }
 
-    private fun buildGetSessionXML(): String {
-        return """<?xml version="1.0" encoding="utf-8"?>
-<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">
-    <s:Body>
-        <u:GetSessionID xmlns:u="urn:dslforum-org:service:DeviceConfig:1"/>
-    </s:Body>
-</s:Envelope>"""
-    }
-
-    private fun buildGetDeviceListXML(): String {
-        return """<?xml version="1.0" encoding="utf-8"?>
-<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">
-    <s:Body>
-        <u:GetDeviceListPath xmlns:u="urn:dslforum-org:service:DeviceConfig:1">
-            <NewSessionID>$sessionId</NewSessionID>
-        </u:GetDeviceListPath>
-    </s:Body>
-</s:Envelope>"""
-    }
-
-    private fun buildToggleXML(deviceId: String, turnOn: Boolean): String {
-        val switchState = if (turnOn) "1" else "0"
-        return """<?xml version="1.0" encoding="utf-8"?>
-<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">
-    <s:Body>
-        <u:SetSwitch xmlns:u="urn:dslforum-org:service:DeviceConfig:1">
-            <NewSessionID>$sessionId</NewSessionID>
-            <NewDeviceId>$deviceId</NewDeviceId>
-            <NewSwitchState>$switchState</NewSwitchState>
-        </u:SetSwitch>
-    </s:Body>
-</s:Envelope>"""
+    override fun onCleared() {
+        super.onCleared()
+        pollingJob?.cancel()
     }
 }
