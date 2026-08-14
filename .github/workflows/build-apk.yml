@@ -26,21 +26,9 @@ jobs:
         gradle --version
         gradle assembleDebug
 
-    - name: Build Release APK with Gradle
-      run: gradle assembleRelease
-
     - name: Upload Debug APK
       uses: actions/upload-artifact@v4
-      if: success()
       with:
         name: debug-apk
         path: app/build/outputs/apk/debug/app-debug.apk
-        retention-days: 30
-
-    - name: Upload Release APK
-      uses: actions/upload-artifact@v4
-      if: success()
-      with:
-        name: release-apk
-        path: app/build/outputs/apk/release/app-release.apk
         retention-days: 30
