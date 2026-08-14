@@ -21,17 +21,17 @@ jobs:
         distribution: 'temurin'
         cache: gradle
 
-    - name: Make gradlew executable
-      run: chmod +x ./gradlew
+    - name: Build Debug APK with Gradle
+      run: |
+        gradle --version
+        gradle assembleDebug
 
-    - name: Build Debug APK
-      run: ./gradlew assembleDebug
-
-    - name: Build Release APK (unsigned)
-      run: ./gradlew assembleRelease
+    - name: Build Release APK with Gradle
+      run: gradle assembleRelease
 
     - name: Upload Debug APK
       uses: actions/upload-artifact@v4
+      if: success()
       with:
         name: debug-apk
         path: app/build/outputs/apk/debug/app-debug.apk
@@ -39,6 +39,7 @@ jobs:
 
     - name: Upload Release APK
       uses: actions/upload-artifact@v4
+      if: success()
       with:
         name: release-apk
         path: app/build/outputs/apk/release/app-release.apk
