@@ -8,6 +8,7 @@
     <application
         android:allowBackup="true"
         android:label="@string/app_name"
+        android:usesCleartextTraffic="true"
         android:theme="@style/Theme.FritzDect">
 
         <activity
