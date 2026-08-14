@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.FritzDect" parent="android:Theme.Material.NoActionBar">
+        <!-- THEGLINKY Colors -->
+        <item name="android:colorBackground">#0A0E27</item>
+        <item name="android:colorForeground">#FFFFFF</item>
+        
+        <!-- Material 3 Colors -->
+        <item name="colorPrimary">#00D9FF</item>
+        <item name="colorPrimaryVariant">#9D4EDD</item>
+        <item name="colorSecondary">#FF006E</item>
+        <item name="colorSecondaryVariant">#9D4EDD</item>
+        <item name="colorError">#FF006E</item>
+        
+        <!-- Surface Colors -->
+        <item name="android:colorBackground">#0A0E27</item>
+        <item name="android:windowBackground">@color/dark_bg</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:statusBarColor">#000000</item>
+        <item name="android:navigationBarColor">#0A0E27</item>
+    </style>
+
+    <color name="dark_bg">#0A0E27</color>
+    <color name="cyan">#00D9FF</color>
+    <color name="purple">#9D4EDD</color>
+    <color name="pink">#FF006E</color>
+    <color name="card_bg">#1A1F3A</color>
+    <color name="divider_color">#2A3050</color>
+</resources>

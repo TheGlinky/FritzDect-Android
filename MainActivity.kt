@@ -1,0 +1,482 @@
+package com.theglinky.fritzdect
+
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.lifecycle.ViewModelProvider
+import kotlinx.coroutines.launch
+
+// THEGLINKY Brand Colors
+object TheglinkyTheme {
+    val DarkBg = Color(0xFF0A0E27)
+    val Cyan = Color(0xFF00D9FF)
+    val Purple = Color(0xFF9D4EDD)
+    val Pink = Color(0xFFFF006E)
+    val GradientBrush = Brush.linearGradient(
+        colors = listOf(Cyan, Purple, Pink)
+    )
+}
+
+class MainActivity : ComponentActivity() {
+    private lateinit var viewModel: FritzViewModel
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        viewModel = ViewModelProvider(this).get(FritzViewModel::class.java)
+
+        setContent {
+            MaterialTheme {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(TheglinkyTheme.DarkBg),
+                    color = TheglinkyTheme.DarkBg
+                ) {
+                    FritzDectApp(viewModel)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun FritzDectApp(viewModel: FritzViewModel) {
+    var currentScreen by remember { mutableStateOf<Screen>(Screen.Setup) }
+    val devices by viewModel.devices.collectAsState()
+    val isConnected by viewModel.isConnected.collectAsState()
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(TheglinkyTheme.DarkBg)
+    ) {
+        // Header
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(
+                    brush = TheglinkyTheme.GradientBrush,
+                    shape = RoundedCornerShape(bottomStart = 16.dp, bottomEnd = 16.dp)
+                )
+                .padding(24.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                "THEGLINKY FRITZ!DECT",
+                fontSize = 28.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                fontFamily = FontFamily.Monospace
+            )
+        }
+
+        // Connection Status
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color(0xFF1A1F3A))
+                .padding(16.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(12.dp)
+                            .background(
+                                color = if (isConnected) TheglinkyTheme.Cyan else Color.Gray,
+                                shape = RoundedCornerShape(50)
+                            )
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        if (isConnected) "Connected" else "Disconnected",
+                        color = if (isConnected) TheglinkyTheme.Cyan else Color.Gray,
+                        fontSize = 14.sp,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+
+                Button(
+                    onClick = { currentScreen = Screen.Setup },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = TheglinkyTheme.Purple
+                    ),
+                    modifier = Modifier.height(36.dp)
+                ) {
+                    Text("Settings", fontFamily = FontFamily.Monospace, fontSize = 12.sp)
+                }
+            }
+        }
+
+        // Main Content
+        when (currentScreen) {
+            Screen.Setup -> SetupScreen(viewModel) { currentScreen = Screen.Devices }
+            Screen.Devices -> DevicesScreen(devices, viewModel)
+        }
+    }
+}
+
+@Composable
+fun SetupScreen(viewModel: FritzViewModel, onConnected: () -> Unit) {
+    var fritzBoxIP by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    var isLoading by remember { mutableStateOf(false) }
+    var errorMsg by remember { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp)
+            .verticalScroll(androidx.compose.foundation.rememberScrollState()),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            "FRITZ!BOX SETUP",
+            fontSize = 20.sp,
+            fontWeight = FontWeight.Bold,
+            color = TheglinkyTheme.Cyan,
+            fontFamily = FontFamily.Monospace,
+            modifier = Modifier.padding(bottom = 32.dp)
+        )
+
+        // IP Input
+        OutlinedTextField(
+            value = fritzBoxIP,
+            onValueChange = { fritzBoxIP = it },
+            label = { Text("FRITZ!Box IP", color = TheglinkyTheme.Cyan) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 16.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = TheglinkyTheme.Cyan,
+                unfocusedBorderColor = TheglinkyTheme.Purple,
+                focusedTextColor = Color.White,
+                unfocusedTextColor = Color.White
+            ),
+            textStyle = androidx.compose.material3.LocalTextStyle.current.copy(
+                fontFamily = FontFamily.Monospace
+            )
+        )
+
+        // Password Input
+        OutlinedTextField(
+            value = password,
+            onValueChange = { password = it },
+            label = { Text("Password (optional)", color = TheglinkyTheme.Cyan) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 24.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = TheglinkyTheme.Cyan,
+                unfocusedBorderColor = TheglinkyTheme.Purple,
+                focusedTextColor = Color.White,
+                unfocusedTextColor = Color.White
+            ),
+            textStyle = androidx.compose.material3.LocalTextStyle.current.copy(
+                fontFamily = FontFamily.Monospace
+            )
+        )
+
+        if (errorMsg.isNotEmpty()) {
+            Text(
+                errorMsg,
+                color = TheglinkyTheme.Pink,
+                fontSize = 12.sp,
+                modifier = Modifier.padding(bottom = 16.dp),
+                fontFamily = FontFamily.Monospace
+            )
+        }
+
+        Button(
+            onClick = {
+                isLoading = true
+                scope.launch {
+                    try {
+                        viewModel.connectToFritzBox(fritzBoxIP, password)
+                        onConnected()
+                    } catch (e: Exception) {
+                        errorMsg = "Connection failed: ${e.message}"
+                    } finally {
+                        isLoading = false
+                    }
+                }
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(50.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = TheglinkyTheme.Purple
+            ),
+            enabled = !isLoading && fritzBoxIP.isNotEmpty()
+        ) {
+            if (isLoading) {
+                CircularProgressIndicator(
+                    color = TheglinkyTheme.Cyan,
+                    modifier = Modifier.size(20.dp)
+                )
+            } else {
+                Text("CONNECT", fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+
+@Composable
+fun DevicesScreen(devices: List<FritzDevice>, viewModel: FritzViewModel) {
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        items(devices) { device ->
+            FritzDeviceCard(device, viewModel)
+        }
+    }
+}
+
+@Composable
+fun FritzDeviceCard(device: FritzDevice, viewModel: FritzViewModel) {
+    var showTimerDialog by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color(0xFF1A1F3A)),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF1A1F3A))
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            // Device Name & Status
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 12.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(
+                        device.name,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TheglinkyTheme.Cyan,
+                        fontFamily = FontFamily.Monospace
+                    )
+                    Text(
+                        device.deviceId,
+                        fontSize = 12.sp,
+                        color = Color.Gray,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+
+                // Live Toggle Button
+                Button(
+                    onClick = {
+                        scope.launch {
+                            viewModel.toggleDevice(device.deviceId, !device.isOn)
+                        }
+                    },
+                    modifier = Modifier
+                        .size(50.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (device.isOn) TheglinkyTheme.Pink else TheglinkyTheme.Purple
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text(
+                        if (device.isOn) "ON" else "OFF",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+            }
+
+            Divider(color = Color(0xFF2A3050), modifier = Modifier.padding(vertical = 8.dp))
+
+            // Power & Temperature
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 12.dp),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    "Power: ${device.power}W",
+                    fontSize = 12.sp,
+                    color = TheglinkyTheme.Cyan,
+                    fontFamily = FontFamily.Monospace
+                )
+                Text(
+                    "Temp: ${device.temperature}°C",
+                    fontSize = 12.sp,
+                    color = TheglinkyTheme.Cyan,
+                    fontFamily = FontFamily.Monospace
+                )
+            }
+
+            // Timer Status (if active)
+            if (device.timerActive) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xFF2A3050), RoundedCornerShape(8.dp))
+                        .padding(8.dp)
+                ) {
+                    Text(
+                        "⏱ Timer: ${device.timerInfo}",
+                        fontSize = 11.sp,
+                        color = TheglinkyTheme.Pink,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+
+            // Timer Button
+            Button(
+                onClick = { showTimerDialog = true },
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = TheglinkyTheme.Purple
+                ),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text("⏰ SET TIMER", fontFamily = FontFamily.Monospace, fontSize = 12.sp)
+            }
+        }
+    }
+
+    if (showTimerDialog) {
+        TimerDialog(
+            device = device,
+            viewModel = viewModel,
+            onDismiss = { showTimerDialog = false }
+        )
+    }
+}
+
+@Composable
+fun TimerDialog(device: FritzDevice, viewModel: FritzViewModel, onDismiss: () -> Unit) {
+    var onMinutes by remember { mutableStateOf("10") }
+    var pauseHours by remember { mutableStateOf("3") }
+    var isRepeat by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                "TIMER: ${device.name}",
+                color = TheglinkyTheme.Cyan,
+                fontFamily = FontFamily.Monospace,
+                fontSize = 16.sp
+            )
+        },
+        text = {
+            Column {
+                Text("ON Duration (minutes)", color = TheglinkyTheme.Cyan, fontSize = 12.sp)
+                OutlinedTextField(
+                    value = onMinutes,
+                    onValueChange = { onMinutes = it },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 16.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color.White,
+                        focusedBorderColor = TheglinkyTheme.Cyan
+                    )
+                )
+
+                Text("Pause Duration (hours)", color = TheglinkyTheme.Cyan, fontSize = 12.sp)
+                OutlinedTextField(
+                    value = pauseHours,
+                    onValueChange = { pauseHours = it },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 16.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color.White,
+                        focusedBorderColor = TheglinkyTheme.Cyan
+                    )
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Checkbox(
+                        checked = isRepeat,
+                        onCheckedChange = { isRepeat = it },
+                        colors = CheckboxDefaults.colors(
+                            checkedColor = TheglinkyTheme.Pink,
+                            uncheckedColor = TheglinkyTheme.Purple
+                        )
+                    )
+                    Text(
+                        "Repeat daily",
+                        color = TheglinkyTheme.Cyan,
+                        fontSize = 14.sp,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+            }
+        },
+        containerColor = Color(0xFF1A1F3A),
+        confirmButton = {
+            Button(
+                onClick = {
+                    scope.launch {
+                        viewModel.setTimer(
+                            device.deviceId,
+                            onMinutes.toIntOrNull() ?: 10,
+                            pauseHours.toIntOrNull() ?: 3,
+                            isRepeat
+                        )
+                        onDismiss()
+                    }
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = TheglinkyTheme.Pink)
+            ) {
+                Text("START", fontFamily = FontFamily.Monospace)
+            }
+        },
+        dismissButton = {
+            Button(
+                onClick = onDismiss,
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2A3050))
+            ) {
+                Text("CANCEL", fontFamily = FontFamily.Monospace)
+            }
+        }
+    )
+}
+
+sealed class Screen {
+    object Setup : Screen()
+    object Devices : Screen()
+}

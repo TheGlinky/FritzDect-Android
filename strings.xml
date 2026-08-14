@@ -1,0 +1,13 @@
+<resources>
+    <string name="app_name">THEGLINKY FRITZ!DECT</string>
+    <string name="setup_title">FRITZ!Box Setup</string>
+    <string name="ip_label">FRITZ!Box IP</string>
+    <string name="password_label">Password</string>
+    <string name="connect_button">CONNECT</string>
+    <string name="timer_button">SET TIMER</string>
+    <string name="on_duration">ON Duration (minutes)</string>
+    <string name="pause_duration">Pause Duration (hours)</string>
+    <string name="repeat_daily">Repeat daily</string>
+    <string name="start_timer">START</string>
+    <string name="cancel">CANCEL</string>
+</resources>
