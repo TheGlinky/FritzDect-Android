@@ -531,8 +531,7 @@ fun FritzDeviceCard(device: FritzDevice, viewModel: FritzViewModel) {
     }
 }
 
-
-Composable
+@Composable
 fun TimerDialog(device: FritzDevice, viewModel: FritzViewModel, onDismiss: () -> Unit) {
     var onMinutes by remember { mutableStateOf("10") }
     var pauseHours by remember { mutableStateOf("3") }
