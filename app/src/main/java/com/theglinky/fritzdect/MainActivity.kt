@@ -333,3 +333,106 @@ fun SetupScreen(
         }
     }
 }
+
+@Composable
+fun DevicesScreen(devices: List<FritzDevice>, viewModel: FritzViewModel, isConnected: Boolean) {
+    if (isConnected && devices.isEmpty()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text(
+                "Keine FRITZ!DECT Steckdosen gefunden.",
+                color = TheglinkyTheme.Cyan,
+                fontFamily = FontFamily.Monospace,
+                fontSize = 14.sp
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                "Stell sicher, dass mindestens eine Steckdose in der FRITZ!Box eingerichtet ist.",
+                color = Color.Gray,
+                fontFamily = FontFamily.Monospace,
+                fontSize = 12.sp
+            )
+        }
+        return
+    }
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        items(devices) { device ->
+            FritzDeviceCard(device, viewModel)
+        }
+    }
+}
+
+@Composable
+fun FritzDeviceCard(device: FritzDevice, viewModel: FritzViewModel) {
+    val scope = rememberCoroutineScope()
+    val bgColor = if (device.isOn) TheglinkyTheme.GreenOn else TheglinkyTheme.RedOff
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable {
+                scope.launch {
+                    viewModel.toggleDevice(device.ain, !device.isOn)
+                }
+            },
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = bgColor)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    device.name,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    fontFamily = FontFamily.Monospace
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    "${device.power}W  |  ${device.temperature} Grad C",
+                    fontSize = 12.sp,
+                    color = Color.White.copy(alpha = 0.8f),
+                    fontFamily = FontFamily.Monospace
+                )
+            }
+
+            Box(
+                modifier = Modifier
+                    .size(64.dp)
+                    .background(Color.White.copy(alpha = 0.15f), RoundedCornerShape(16.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    if (device.isOn) "AN" else "AUS",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    fontFamily = FontFamily.Monospace
+                )
+            }
+        }
+    }
+}
+
+sealed class Screen {
+    object Setup : Screen()
+    object Devices : Screen()
+}
+
