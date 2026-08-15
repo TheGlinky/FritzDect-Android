@@ -19,6 +19,8 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.TimeUnit
+import javax.crypto.Mac
+import javax.crypto.spec.SecretKeySpec
 
 data class FritzDevice(
     val ain: String,
@@ -132,7 +134,7 @@ class FritzViewModel : ViewModel() {
                     throw Exception("Anmeldung fehlgeschlagen. Benutzername oder Passwort falsch.")
                 }
 
-                log("Session erhalten", LogLevel.SUCCESS)
+                log("Session erhalten: ${sessionId.take(8)}...", LogLevel.SUCCESS)
 
                 val devices = fetchDeviceList()
                 log("${devices.size} Geraet(e) gefunden", LogLevel.SUCCESS)
@@ -153,11 +155,10 @@ class FritzViewModel : ViewModel() {
     }
 
     /**
-     * AVM Challenge-Response Login-Verfahren (login_sid.lua).
-     * Schritt 1: Challenge holen. Schritt 2: MD5(challenge-passwort) in UTF-16LE senden.
+     * AVM Login Version 2 (PBKDF2) mit Fallback auf Version 1 (MD5),
+     * falls die FRITZ!Box eine alte Challenge im MD5-Format schickt.
      */
     private fun fetchSessionId(): String {
-        // Schritt 1: Challenge holen
         val challengeUrl = "http://$fritzBoxIP/login_sid.lua?version=2"
         val challengeRequest = Request.Builder().url(challengeUrl).build()
         val challengeResponse = httpClient.newCall(challengeRequest).execute()
@@ -168,20 +169,101 @@ class FritzViewModel : ViewModel() {
             throw Exception("Konnte Challenge nicht aus FRITZ!Box-Antwort lesen.")
         }
 
-        // Schritt 2: Response berechnen (MD5 von "challenge-passwort", UTF-16LE)
-        val challengeResponseString = "$challenge-$fritzPassword"
-        val md5 = MessageDigest.getInstance("MD5")
-        val hashBytes = md5.digest(challengeResponseString.toByteArray(Charsets.UTF_16LE))
-        val hashHex = hashBytes.joinToString("") { "%02x".format(it) }
-        val response = "$challenge-$hashHex"
+        val response = if (challenge.startsWith("2\$")) {
+            computePbkdf2Response(challenge, fritzPassword)
+        } else {
+            computeMd5Response(challenge, fritzPassword)
+        }
 
-        // Schritt 3: Login mit Response senden
         val loginUrl = "http://$fritzBoxIP/login_sid.lua?version=2&username=$fritzUser&response=$response"
         val loginRequest = Request.Builder().url(loginUrl).build()
         val loginResponse = httpClient.newCall(loginRequest).execute()
         val loginXml = loginResponse.body?.string() ?: throw Exception("Keine Antwort beim Login.")
 
         return extractXmlValue(loginXml, "SID")
+    }
+
+    /**
+     * Neues PBKDF2-Verfahren (Challenge beginnt mit "2$").
+     * Format: 2$iter1$salt1$iter2$salt2
+     * hash1 = PBKDF2-HMAC-SHA256(passwort, salt1, iter1) -> 32 Bytes
+     * hash2 = PBKDF2-HMAC-SHA256(hash1_hex_bytes... eigentlich hash1 raw, salt2, iter2)
+     * Response = salt2 + "$" + hash2_hex
+     */
+    private fun computePbkdf2Response(challenge: String, password: String): String {
+        val parts = challenge.split("$")
+        // parts[0] = "2", parts[1] = iter1, parts[2] = salt1, parts[3] = iter2, parts[4] = salt2
+        val iter1 = parts[1].toInt()
+        val salt1 = hexStringToByteArray(parts[2])
+        val iter2 = parts[3].toInt()
+        val salt2 = hexStringToByteArray(parts[4])
+
+        val hash1 = pbkdf2HmacSha256(password.toByteArray(Charsets.UTF_8), salt1, iter1, 32)
+        val hash2 = pbkdf2HmacSha256(hash1, salt2, iter2, 32)
+
+        val hash2Hex = hash2.joinToString("") { "%02x".format(it) }
+        return "${parts[4]}\$$hash2Hex"
+    }
+
+    /**
+     * PBKDF2-HMAC-SHA256 nach RFC 8018, arbeitet durchgehend mit rohen Bytes
+     * (kein Umweg ueber char[]/PBEKeySpec, da der 2. Durchlauf binaere Daten
+     * als "Passwort" nutzt, keinen Text).
+     */
+    private fun pbkdf2HmacSha256(keyBytes: ByteArray, salt: ByteArray, iterations: Int, keyLengthBytes: Int): ByteArray {
+        val hmac = Mac.getInstance("HmacSHA256")
+        hmac.init(SecretKeySpec(keyBytes, "HmacSHA256"))
+        val hLen = hmac.macLength
+
+        val blockCount = Math.ceil(keyLengthBytes.toDouble() / hLen).toInt()
+        val output = ByteArray(blockCount * hLen)
+
+        for (blockIndex in 1..blockCount) {
+            val blockIndexBytes = byteArrayOf(
+                (blockIndex ushr 24).toByte(),
+                (blockIndex ushr 16).toByte(),
+                (blockIndex ushr 8).toByte(),
+                blockIndex.toByte()
+            )
+
+            hmac.init(SecretKeySpec(keyBytes, "HmacSHA256"))
+            var u = hmac.doFinal(salt + blockIndexBytes)
+            val t = u.copyOf()
+
+            for (i in 2..iterations) {
+                hmac.init(SecretKeySpec(keyBytes, "HmacSHA256"))
+                u = hmac.doFinal(u)
+                for (j in t.indices) {
+                    t[j] = (t[j].toInt() xor u[j].toInt()).toByte()
+                }
+            }
+
+            System.arraycopy(t, 0, output, (blockIndex - 1) * hLen, hLen)
+        }
+
+        return output.copyOf(keyLengthBytes)
+    }
+
+    private fun hexStringToByteArray(hex: String): ByteArray {
+        val len = hex.length
+        val data = ByteArray(len / 2)
+        var i = 0
+        while (i < len) {
+            data[i / 2] = ((Character.digit(hex[i], 16) shl 4) + Character.digit(hex[i + 1], 16)).toByte()
+            i += 2
+        }
+        return data
+    }
+
+    /**
+     * Altes MD5-Verfahren als Fallback (falls Challenge kein "2$" Format hat).
+     */
+    private fun computeMd5Response(challenge: String, password: String): String {
+        val challengeResponseString = "$challenge-$password"
+        val md5 = MessageDigest.getInstance("MD5")
+        val hashBytes = md5.digest(challengeResponseString.toByteArray(Charsets.UTF_16LE))
+        val hashHex = hashBytes.joinToString("") { "%02x".format(it) }
+        return "$challenge-$hashHex"
     }
 
     private fun extractXmlValue(xml: String, tagName: String): String {
@@ -221,7 +303,6 @@ class FritzViewModel : ViewModel() {
         }
 
         if (response.code == 403) {
-            // Session evtl. abgelaufen, einmal neu versuchen
             log("Session evtl. abgelaufen, neu anmelden...", LogLevel.WARNING)
             sessionId = fetchSessionId()
             if (sessionId.isEmpty() || sessionId == "0000000000000000") {
