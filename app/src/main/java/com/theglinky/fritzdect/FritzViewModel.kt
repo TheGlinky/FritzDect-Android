@@ -55,6 +55,9 @@ class FritzViewModel : ViewModel() {
     private val _hasSavedCredentials = MutableStateFlow(false)
     val hasSavedCredentials: StateFlow<Boolean> = _hasSavedCredentials
 
+    private val _hasCheckedSavedCredentials = MutableStateFlow(false)
+    val hasCheckedSavedCredentials: StateFlow<Boolean> = _hasCheckedSavedCredentials
+
     private var fritzBoxIP = ""
     private var fritzUser = ""
     private var fritzPassword = ""
@@ -97,6 +100,8 @@ class FritzViewModel : ViewModel() {
             log("Gespeicherte Zugangsdaten gefunden, verbinde automatisch...", LogLevel.INFO)
             connectToFritzBox(savedIp, savedPassword, savedUser, saveOnSuccess = false)
         }
+
+        _hasCheckedSavedCredentials.value = true
     }
 
     private fun saveCredentials(ip: String, user: String, password: String) {
