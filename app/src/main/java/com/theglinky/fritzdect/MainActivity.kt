@@ -204,10 +204,22 @@ fun SetupScreen(viewModel: FritzViewModel, errorMessage: String, onConnected: ()
             )
         )
 
+        var passwordVisible by remember { mutableStateOf(false) }
         OutlinedTextField(
             value = password,
             onValueChange = { password = it },
             label = { Text("FRITZ!Box Passwort", color = TheglinkyTheme.Cyan) },
+            visualTransformation = if (passwordVisible) androidx.compose.ui.text.input.VisualTransformation.None else androidx.compose.ui.text.input.PasswordVisualTransformation(),
+            trailingIcon = {
+                TextButton(onClick = { passwordVisible = !passwordVisible }) {
+                    Text(
+                        if (passwordVisible) "Verbergen" else "Anzeigen",
+                        color = TheglinkyTheme.Cyan,
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+            },
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(bottom = 8.dp),
@@ -253,7 +265,8 @@ fun SetupScreen(viewModel: FritzViewModel, errorMessage: String, onConnected: ()
                 .fillMaxWidth()
                 .height(50.dp),
             colors = ButtonDefaults.buttonColors(
-                containerColor = TheglinkyTheme.Purple
+                containerColor = TheglinkyTheme.Purple,
+                disabledContainerColor = TheglinkyTheme.Purple.copy(alpha = 0.5f)
             ),
             enabled = !isLoading && fritzBoxIP.isNotEmpty()
         ) {
