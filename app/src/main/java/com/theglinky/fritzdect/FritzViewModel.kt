@@ -9,6 +9,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.xmlpull.v1.XmlPullParser
@@ -147,9 +148,10 @@ class FritzViewModel : ViewModel() {
 
                 startPolling()
             } catch (e: Exception) {
-                log("Fehler: ${e.message}", LogLevel.ERROR)
+                val errorText = e.message ?: e.javaClass.simpleName
+                log("Fehler: $errorText", LogLevel.ERROR)
                 _isConnected.emit(false)
-                _errorMessage.emit(e.message ?: "Verbindung fehlgeschlagen")
+                _errorMessage.emit(errorText)
             }
         }
     }
@@ -410,25 +412,28 @@ class FritzViewModel : ViewModel() {
     }
 
     suspend fun toggleDevice(ain: String, turnOn: Boolean) {
-        try {
-            if (sessionId.isEmpty()) {
-                sessionId = fetchSessionId()
-            }
+        withContext(Dispatchers.IO) {
+            try {
+                if (sessionId.isEmpty()) {
+                    sessionId = fetchSessionId()
+                }
 
-            val cmd = if (turnOn) "setswitchon" else "setswitchoff"
-            val url = "http://$fritzBoxIP/webservices/homeautoswitch.lua?switchcmd=$cmd&ain=$ain&sid=$sessionId"
-            val response = httpClient.newCall(Request.Builder().url(url).build()).execute()
+                val cmd = if (turnOn) "setswitchon" else "setswitchoff"
+                val url = "http://$fritzBoxIP/webservices/homeautoswitch.lua?switchcmd=$cmd&ain=$ain&sid=$sessionId"
+                val response = httpClient.newCall(Request.Builder().url(url).build()).execute()
 
-            if (response.isSuccessful) {
-                log("${if (turnOn) "Eingeschaltet" else "Ausgeschaltet"}: $ain", LogLevel.SUCCESS)
-                updateDeviceState(ain, turnOn)
-            } else {
-                log("Schalten fehlgeschlagen: HTTP ${response.code}", LogLevel.ERROR)
-                _errorMessage.emit("Schalten fehlgeschlagen: HTTP ${response.code}")
+                if (response.isSuccessful) {
+                    log("${if (turnOn) "Eingeschaltet" else "Ausgeschaltet"}: $ain", LogLevel.SUCCESS)
+                    updateDeviceState(ain, turnOn)
+                } else {
+                    log("Schalten fehlgeschlagen: HTTP ${response.code}", LogLevel.ERROR)
+                    _errorMessage.emit("Schalten fehlgeschlagen: HTTP ${response.code}")
+                }
+            } catch (e: Exception) {
+                val errorText = e.message ?: e.javaClass.simpleName
+                log("Fehler beim Schalten: $errorText", LogLevel.ERROR)
+                _errorMessage.emit("Schalten fehlgeschlagen: $errorText")
             }
-        } catch (e: Exception) {
-            log("Fehler beim Schalten: ${e.message}", LogLevel.ERROR)
-            _errorMessage.emit("Schalten fehlgeschlagen: ${e.message}")
         }
     }
 
