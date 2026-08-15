@@ -21,21 +21,11 @@ import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 data class FritzDevice(
-    val deviceId: String,
     val ain: String,
     val name: String,
     val isOn: Boolean,
     val power: Int = 0,
-    val temperature: Int = 0,
-    val timerActive: Boolean = false,
-    val timerInfo: String = ""
-)
-
-data class TimerConfig(
-    val deviceId: String,
-    val onMinutes: Int,
-    val pauseHours: Int,
-    val isRepeat: Boolean
+    val temperature: Int = 0
 )
 
 enum class LogLevel { INFO, SUCCESS, ERROR, WARNING }
@@ -73,15 +63,13 @@ class FritzViewModel : ViewModel() {
         .readTimeout(10, TimeUnit.SECONDS)
         .build()
 
-    private val timerConfigs = mutableMapOf<String, TimerConfig>()
     private var pollingJob: kotlinx.coroutines.Job? = null
 
     private fun timestamp(): String =
         SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
 
     private fun log(message: String, level: LogLevel = LogLevel.INFO) {
-        val entry = LogEntry(timestamp(), message, level)
-        _logs.value = _logs.value + entry
+        _logs.value = _logs.value + LogEntry(timestamp(), message, level)
         when (level) {
             LogLevel.ERROR -> Log.e("FritzViewModel", message)
             LogLevel.WARNING -> Log.w("FritzViewModel", message)
@@ -93,10 +81,6 @@ class FritzViewModel : ViewModel() {
         _logs.value = emptyList()
     }
 
-    /**
-     * Initialisiert die gespeicherten Zugangsdaten (aus MainActivity beim App-Start aufrufen).
-     * Wenn Daten vorhanden sind, wird automatisch verbunden.
-     */
     fun initAndAutoConnect(context: Context) {
         prefs = context.getSharedPreferences("fritz_prefs", Context.MODE_PRIVATE)
 
@@ -118,7 +102,7 @@ class FritzViewModel : ViewModel() {
             ?.putString("password", password)
             ?.apply()
         _hasSavedCredentials.value = true
-        log("Zugangsdaten gespeichert - naechstes Mal automatisch verbinden", LogLevel.INFO)
+        log("Zugangsdaten gespeichert", LogLevel.INFO)
     }
 
     fun forgetCredentials() {
@@ -136,29 +120,13 @@ class FritzViewModel : ViewModel() {
 
         viewModelScope.launch(Dispatchers.IO) {
             _errorMessage.emit("")
-            log("Verbindungsversuch zu $fritzBoxIP gestartet...", LogLevel.INFO)
-
-            if (fritzUser.isEmpty() || fritzPassword.isEmpty()) {
-                log("Benutzername oder Passwort fehlt.", LogLevel.WARNING)
-            }
+            log("Verbinde zu $fritzBoxIP...", LogLevel.INFO)
 
             try {
-                log("Sende Anfrage: getdevicelistinfos", LogLevel.INFO)
                 val devices = fetchDeviceList()
-
-                log("Antwort erhalten, ${devices.size} Geraet(e) gefunden", LogLevel.SUCCESS)
+                log("${devices.size} Geraet(e) gefunden", LogLevel.SUCCESS)
                 _devices.emit(devices)
                 _isConnected.emit(true)
-
-                if (devices.isEmpty()) {
-                    log("Verbindung ok, aber keine FRITZ!DECT Steckdosen in der FRITZ!Box gefunden.", LogLevel.WARNING)
-                } else {
-                    devices.forEach { d ->
-                        log("Geraet erkannt: ${d.name} (${d.ain}) - ${if (d.isOn) "AN" else "AUS"}", LogLevel.INFO)
-                    }
-                }
-
-                log("Verbindung erfolgreich hergestellt", LogLevel.SUCCESS)
 
                 if (saveOnSuccess) {
                     saveCredentials(fritzBoxIP, fritzUser, fritzPassword)
@@ -166,9 +134,9 @@ class FritzViewModel : ViewModel() {
 
                 startPolling()
             } catch (e: Exception) {
-                log("FEHLER: ${e.javaClass.simpleName}: ${e.message}", LogLevel.ERROR)
+                log("Fehler: ${e.message}", LogLevel.ERROR)
                 _isConnected.emit(false)
-                _errorMessage.emit(e.message ?: "Connection failed")
+                _errorMessage.emit(e.message ?: "Verbindung fehlgeschlagen")
             }
         }
     }
@@ -181,27 +149,24 @@ class FritzViewModel : ViewModel() {
 
     private suspend fun fetchDeviceList(): List<FritzDevice> {
         val url = "http://$fritzBoxIP/webservices/homeautoswitch.lua?switchcmd=getdevicelistinfos"
-
         val requestBuilder = Request.Builder().url(url)
         buildAuthHeader()?.let { requestBuilder.addHeader("Authorization", it) }
 
         val response = try {
             httpClient.newCall(requestBuilder.build()).execute()
         } catch (e: java.net.ConnectException) {
-            throw Exception("Keine Verbindung zu $fritzBoxIP moeglich. Ist die IP korrekt und bist du im selben WLAN/VPN?")
+            throw Exception("Keine Verbindung zu $fritzBoxIP moeglich. IP korrekt und im gleichen WLAN?")
         } catch (e: java.net.UnknownHostException) {
-            throw Exception("Adresse $fritzBoxIP nicht aufloesbar. IP-Format pruefen (z.B. 192.168.178.1).")
+            throw Exception("Adresse $fritzBoxIP nicht aufloesbar.")
         } catch (e: java.net.SocketTimeoutException) {
-            throw Exception("Zeitueberschreitung - FRITZ!Box antwortet nicht unter $fritzBoxIP.")
+            throw Exception("Zeitueberschreitung - FRITZ!Box antwortet nicht.")
         }
-
-        log("HTTP Status: ${response.code}", if (response.isSuccessful) LogLevel.INFO else LogLevel.ERROR)
 
         if (response.code == 403) {
-            throw Exception("HTTP 403: Zugriff verweigert. Benutzername/Passwort falsch oder Benutzer hat keine Smart-Home-Berechtigung.")
+            throw Exception("Zugriff verweigert. Benutzername/Passwort falsch oder keine Smart-Home-Berechtigung.")
         }
         if (!response.isSuccessful) {
-            throw Exception("HTTP ${response.code}: Unerwartete Antwort von der FRITZ!Box.")
+            throw Exception("HTTP ${response.code} von der FRITZ!Box.")
         }
 
         val xml = response.body?.string() ?: throw Exception("Leere Antwort von FRITZ!Box")
@@ -266,7 +231,6 @@ class FritzViewModel : ViewModel() {
                             if (insideDevice && currentAin.isNotEmpty()) {
                                 devices.add(
                                     FritzDevice(
-                                        deviceId = currentAin,
                                         ain = currentAin,
                                         name = currentName.ifEmpty { "Steckdose $currentAin" },
                                         isOn = currentSwitchState,
@@ -296,8 +260,6 @@ class FritzViewModel : ViewModel() {
     suspend fun toggleDevice(ain: String, turnOn: Boolean) {
         try {
             val cmd = if (turnOn) "setswitchon" else "setswitchoff"
-            log("Schalte $ain -> ${if (turnOn) "AN" else "AUS"}...", LogLevel.INFO)
-
             val url = "http://$fritzBoxIP/webservices/homeautoswitch.lua?switchcmd=$cmd&ain=$ain"
 
             val requestBuilder = Request.Builder().url(url)
@@ -306,54 +268,16 @@ class FritzViewModel : ViewModel() {
             val response = httpClient.newCall(requestBuilder.build()).execute()
 
             if (response.isSuccessful) {
-                log("Schalten erfolgreich (${response.code})", LogLevel.SUCCESS)
+                log("${if (turnOn) "Eingeschaltet" else "Ausgeschaltet"}: $ain", LogLevel.SUCCESS)
                 updateDeviceState(ain, turnOn)
             } else {
                 log("Schalten fehlgeschlagen: HTTP ${response.code}", LogLevel.ERROR)
                 _errorMessage.emit("Schalten fehlgeschlagen: HTTP ${response.code}")
             }
         } catch (e: Exception) {
-            log("FEHLER beim Schalten: ${e.message}", LogLevel.ERROR)
+            log("Fehler beim Schalten: ${e.message}", LogLevel.ERROR)
             _errorMessage.emit("Schalten fehlgeschlagen: ${e.message}")
         }
-    }
-
-    fun setTimer(ain: String, onMinutes: Int, pauseHours: Int, isRepeat: Boolean) {
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                timerConfigs[ain] = TimerConfig(ain, onMinutes, pauseHours, isRepeat)
-                log("Timer gestartet fuer $ain: ${onMinutes}min AN, ${pauseHours}h Pause, repeat=$isRepeat", LogLevel.INFO)
-
-                toggleDevice(ain, true)
-
-                val onMillis = onMinutes * 60L * 1000L
-                val pauseMillis = pauseHours * 3600L * 1000L
-
-                if (isRepeat) {
-                    while (timerConfigs[ain] != null) {
-                        kotlinx.coroutines.delay(onMillis)
-                        if (timerConfigs[ain] == null) break
-                        toggleDevice(ain, false)
-
-                        kotlinx.coroutines.delay(pauseMillis)
-                        if (timerConfigs[ain] == null) break
-                        toggleDevice(ain, true)
-                    }
-                } else {
-                    kotlinx.coroutines.delay(onMillis)
-                    toggleDevice(ain, false)
-                    timerConfigs.remove(ain)
-                    log("Timer fuer $ain abgeschlossen", LogLevel.SUCCESS)
-                }
-            } catch (e: Exception) {
-                log("FEHLER im Timer: ${e.message}", LogLevel.ERROR)
-            }
-        }
-    }
-
-    fun cancelTimer(ain: String) {
-        timerConfigs.remove(ain)
-        log("Timer fuer $ain abgebrochen", LogLevel.WARNING)
     }
 
     private suspend fun updateDeviceState(ain: String, isOn: Boolean) {
