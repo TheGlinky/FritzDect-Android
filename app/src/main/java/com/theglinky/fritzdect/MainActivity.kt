@@ -4,6 +4,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -16,7 +17,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -30,6 +30,8 @@ object TheglinkyTheme {
     val Purple = Color(0xFF9D4EDD)
     val Pink = Color(0xFFFF006E)
     val CardBg = Color(0xFF1A1F3A)
+    val GreenOn = Color(0xFF1B5E3A)
+    val RedOff = Color(0xFF5E1B2A)
 }
 
 class MainActivity : ComponentActivity() {
@@ -81,10 +83,14 @@ fun FritzDectApp(viewModel: FritzViewModel) {
             modifier = Modifier
                 .fillMaxWidth()
                 .background(TheglinkyTheme.CardBg)
-                .padding(16.dp),
+                .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
+            IconButton(onClick = { currentScreen = Screen.Setup }) {
+                Text("\u2699", fontSize = 20.sp, color = TheglinkyTheme.Cyan)
+            }
+
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     modifier = Modifier
@@ -98,22 +104,12 @@ fun FritzDectApp(viewModel: FritzViewModel) {
                 Text(
                     if (isConnected) "Connected" else "Disconnected",
                     color = if (isConnected) TheglinkyTheme.Cyan else Color.Gray,
-                    fontSize = 14.sp,
+                    fontSize = 13.sp,
                     fontFamily = FontFamily.Monospace
                 )
             }
 
-            if (currentScreen == Screen.Devices) {
-                Button(
-                    onClick = { currentScreen = Screen.Setup },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = TheglinkyTheme.Purple
-                    ),
-                    modifier = Modifier.height(36.dp)
-                ) {
-                    Text("Settings", fontFamily = FontFamily.Monospace, fontSize = 12.sp)
-                }
-            }
+            Spacer(modifier = Modifier.width(48.dp))
         }
 
         when (currentScreen) {
@@ -243,7 +239,7 @@ fun SetupScreen(
         )
 
         Text(
-            "Wird beim ersten erfolgreichen Verbinden gespeichert - danach automatischer Login.",
+            "Wird beim ersten erfolgreichen Verbinden gespeichert.",
             fontSize = 11.sp,
             color = Color.Gray,
             fontFamily = FontFamily.Monospace,
@@ -336,259 +332,4 @@ fun SetupScreen(
             }
         }
     }
-}
-@Composable
-fun DevicesScreen(devices: List<FritzDevice>, viewModel: FritzViewModel, isConnected: Boolean) {
-    if (isConnected && devices.isEmpty()) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(32.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            Text(
-                "Keine FRITZ!DECT Steckdosen gefunden.",
-                color = TheglinkyTheme.Cyan,
-                fontFamily = FontFamily.Monospace,
-                fontSize = 14.sp
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                "Stell sicher, dass mindestens eine Steckdose in der FRITZ!Box eingerichtet ist.",
-                color = Color.Gray,
-                fontFamily = FontFamily.Monospace,
-                fontSize = 12.sp
-            )
-        }
-        return
-    }
-
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        items(devices) { device ->
-            FritzDeviceCard(device, viewModel)
-        }
-    }
-}
-
-@Composable
-fun FritzDeviceCard(device: FritzDevice, viewModel: FritzViewModel) {
-    var showTimerDialog by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
-
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = TheglinkyTheme.CardBg)
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 12.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column {
-                    Text(
-                        device.name,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = TheglinkyTheme.Cyan,
-                        fontFamily = FontFamily.Monospace
-                    )
-                    Text(
-                        device.ain,
-                        fontSize = 11.sp,
-                        color = Color.Gray,
-                        fontFamily = FontFamily.Monospace
-                    )
-                }
-
-                Button(
-                    onClick = {
-                        scope.launch {
-                            viewModel.toggleDevice(device.ain, !device.isOn)
-                        }
-                    },
-                    modifier = Modifier.size(56.dp, 44.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (device.isOn) TheglinkyTheme.Pink else TheglinkyTheme.Purple
-                    ),
-                    shape = RoundedCornerShape(8.dp),
-                    contentPadding = PaddingValues(0.dp)
-                ) {
-                    Text(
-                        if (device.isOn) "AN" else "AUS",
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace
-                    )
-                }
-            }
-
-            Divider(color = Color(0xFF2A3050), modifier = Modifier.padding(vertical = 8.dp))
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 12.dp),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    "Leistung: ${device.power}W",
-                    fontSize = 12.sp,
-                    color = TheglinkyTheme.Cyan,
-                    fontFamily = FontFamily.Monospace
-                )
-                Text(
-                    "Temp: ${device.temperature} Grad C",
-                    fontSize = 12.sp,
-                    color = TheglinkyTheme.Cyan,
-                    fontFamily = FontFamily.Monospace
-                )
-            }
-
-            if (device.timerActive) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(Color(0xFF2A3050), RoundedCornerShape(8.dp))
-                        .padding(8.dp)
-                ) {
-                    Text(
-                        "Timer: ${device.timerInfo}",
-                        fontSize = 11.sp,
-                        color = TheglinkyTheme.Pink,
-                        fontFamily = FontFamily.Monospace
-                    )
-                }
-                Spacer(modifier = Modifier.height(8.dp))
-            }
-
-            Button(
-                onClick = { showTimerDialog = true },
-                modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = TheglinkyTheme.Purple
-                ),
-                shape = RoundedCornerShape(8.dp)
-            ) {
-                Text("TIMER EINSTELLEN", fontFamily = FontFamily.Monospace, fontSize = 12.sp)
-            }
-        }
-    }
-
-    if (showTimerDialog) {
-        TimerDialog(
-            device = device,
-            viewModel = viewModel,
-            onDismiss = { showTimerDialog = false }
-        )
-    }
-}
-
-@Composable
-fun TimerDialog(device: FritzDevice, viewModel: FritzViewModel, onDismiss: () -> Unit) {
-    var onMinutes by remember { mutableStateOf("10") }
-    var pauseHours by remember { mutableStateOf("3") }
-    var isRepeat by remember { mutableStateOf(false) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Text(
-                "TIMER: ${device.name}",
-                color = TheglinkyTheme.Cyan,
-                fontFamily = FontFamily.Monospace,
-                fontSize = 16.sp
-            )
-        },
-        text = {
-            Column {
-                Text("AN-Dauer (Minuten)", color = TheglinkyTheme.Cyan, fontSize = 12.sp)
-                OutlinedTextField(
-                    value = onMinutes,
-                    onValueChange = { onMinutes = it },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 16.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
-                        focusedBorderColor = TheglinkyTheme.Cyan
-                    )
-                )
-
-                Text("Pause-Dauer (Stunden)", color = TheglinkyTheme.Cyan, fontSize = 12.sp)
-                OutlinedTextField(
-                    value = pauseHours,
-                    onValueChange = { pauseHours = it },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 16.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
-                        focusedBorderColor = TheglinkyTheme.Cyan
-                    )
-                )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Checkbox(
-                        checked = isRepeat,
-                        onCheckedChange = { isRepeat = it },
-                        colors = CheckboxDefaults.colors(
-                            checkedColor = TheglinkyTheme.Pink,
-                            uncheckedColor = TheglinkyTheme.Purple
-                        )
-                    )
-                    Text(
-                        "Wiederholen",
-                        color = TheglinkyTheme.Cyan,
-                        fontSize = 14.sp,
-                        fontFamily = FontFamily.Monospace
-                    )
-                }
-            }
-        },
-        containerColor = TheglinkyTheme.CardBg,
-        confirmButton = {
-            Button(
-                onClick = {
-                    viewModel.setTimer(
-                        device.ain,
-                        onMinutes.toIntOrNull() ?: 10,
-                        pauseHours.toIntOrNull() ?: 3,
-                        isRepeat
-                    )
-                    onDismiss()
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = TheglinkyTheme.Pink)
-            ) {
-                Text("START", fontFamily = FontFamily.Monospace)
-            }
-        },
-        dismissButton = {
-            Button(
-                onClick = onDismiss,
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2A3050))
-            ) {
-                Text("ABBRECHEN", fontFamily = FontFamily.Monospace)
-            }
-        }
-    )
-}
-
-sealed class Screen {
-    object Setup : Screen()
-    object Devices : Screen()
 }
