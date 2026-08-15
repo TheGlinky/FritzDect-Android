@@ -435,4 +435,3 @@ sealed class Screen {
     object Setup : Screen()
     object Devices : Screen()
 }
-
