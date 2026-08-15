@@ -537,4 +537,4 @@ fun TimerDialog(device: FritzDevice, viewModel: FritzViewModel, onDismiss: () ->
     var pauseHours by remember { mutableStateOf("3") }
     var isRepeat by remember { mutableStateOf(false) }
 
-    
+    A
