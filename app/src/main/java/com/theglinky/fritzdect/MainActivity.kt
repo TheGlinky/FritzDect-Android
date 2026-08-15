@@ -59,39 +59,38 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun FritzDectApp(viewModel: FritzViewModel) {
-    var currentScreen by remember { mutableStateOf<Screen>(Screen.Setup) }
     val devices by viewModel.devices.collectAsState()
     val isConnected by viewModel.isConnected.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
     val logs by viewModel.logs.collectAsState()
     val hasSavedCredentials by viewModel.hasSavedCredentials.collectAsState()
-
-    var wasConnected by remember { mutableStateOf(false) }
-    LaunchedEffect(isConnected) {
-        if (isConnected && !wasConnected) {
-            currentScreen = Screen.Devices
-        }
-        wasConnected = isConnected
-    }
+    val hasCheckedSaved by viewModel.hasCheckedSavedCredentials.collectAsState()
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(TheglinkyTheme.DarkBg)
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(TheglinkyTheme.CardBg)
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            IconButton(onClick = { currentScreen = Screen.Setup }) {
-                Text("\u2699", fontSize = 20.sp, color = TheglinkyTheme.Cyan)
+        if (!hasCheckedSaved) {
+            // Kurzer Ladezustand, bis geprueft wurde ob Zugangsdaten existieren
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator(color = TheglinkyTheme.Cyan)
             }
+            return@Column
+        }
 
-            Row(verticalAlignment = Alignment.CenterVertically) {
+        if (hasSavedCredentials) {
+            // Direkt zu den Steckdosen, kein Setup-Screen, kein Zahnrad
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(TheglinkyTheme.CardBg)
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 Box(
                     modifier = Modifier
                         .size(10.dp)
@@ -109,17 +108,9 @@ fun FritzDectApp(viewModel: FritzViewModel) {
                 )
             }
 
-            Spacer(modifier = Modifier.width(48.dp))
-        }
-
-        when (currentScreen) {
-            Screen.Setup -> SetupScreen(
-                viewModel,
-                errorMessage,
-                logs,
-                hasSavedCredentials
-            ) { currentScreen = Screen.Devices }
-            Screen.Devices -> DevicesScreen(devices, viewModel, isConnected)
+            DevicesScreen(devices, viewModel, isConnected)
+        } else {
+            SetupScreen(viewModel, errorMessage, logs)
         }
     }
 }
@@ -128,9 +119,7 @@ fun FritzDectApp(viewModel: FritzViewModel) {
 fun SetupScreen(
     viewModel: FritzViewModel,
     errorMessage: String,
-    logs: List<LogEntry>,
-    hasSavedCredentials: Boolean,
-    onConnected: () -> Unit
+    logs: List<LogEntry>
 ) {
     var fritzBoxIP by remember { mutableStateOf("") }
     var username by remember { mutableStateOf("") }
@@ -153,34 +142,6 @@ fun SetupScreen(
             fontFamily = FontFamily.Monospace,
             modifier = Modifier.padding(bottom = 24.dp)
         )
-
-        if (hasSavedCredentials) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(TheglinkyTheme.CardBg, RoundedCornerShape(8.dp))
-                    .padding(12.dp)
-            ) {
-                Column {
-                    Text(
-                        "Es sind bereits Zugangsdaten gespeichert.",
-                        color = TheglinkyTheme.Cyan,
-                        fontSize = 12.sp,
-                        fontFamily = FontFamily.Monospace
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    TextButton(onClick = { viewModel.forgetCredentials() }) {
-                        Text(
-                            "Gespeicherte Daten loeschen",
-                            color = TheglinkyTheme.Pink,
-                            fontSize = 12.sp,
-                            fontFamily = FontFamily.Monospace
-                        )
-                    }
-                }
-            }
-            Spacer(modifier = Modifier.height(20.dp))
-        }
 
         OutlinedTextField(
             value = fritzBoxIP,
@@ -239,7 +200,7 @@ fun SetupScreen(
         )
 
         Text(
-            "Wird beim ersten erfolgreichen Verbinden gespeichert.",
+            "Wird beim ersten erfolgreichen Verbinden gespeichert. Danach oeffnet die App direkt die Steckdosen.",
             fontSize = 11.sp,
             color = Color.Gray,
             fontFamily = FontFamily.Monospace,
@@ -252,9 +213,6 @@ fun SetupScreen(
                 scope.launch {
                     viewModel.connectToFritzBox(fritzBoxIP, password, username, saveOnSuccess = true)
                     isLoading = false
-                    if (viewModel.isConnected.value) {
-                        onConnected()
-                    }
                 }
             },
             modifier = Modifier
@@ -333,6 +291,7 @@ fun SetupScreen(
         }
     }
 }
+
 
 @Composable
 fun DevicesScreen(devices: List<FritzDevice>, viewModel: FritzViewModel, isConnected: Boolean) {
@@ -429,9 +388,4 @@ fun FritzDeviceCard(device: FritzDevice, viewModel: FritzViewModel) {
             }
         }
     }
-}
-
-sealed class Screen {
-    object Setup : Screen()
-    object Devices : Screen()
 }
