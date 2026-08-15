@@ -15,7 +15,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -30,9 +29,6 @@ object TheglinkyTheme {
     val Purple = Color(0xFF9D4EDD)
     val Pink = Color(0xFFFF006E)
     val CardBg = Color(0xFF1A1F3A)
-    val GradientBrush = Brush.linearGradient(
-        colors = listOf(Cyan, Purple, Pink)
-    )
 }
 
 class MainActivity : ComponentActivity() {
@@ -64,7 +60,6 @@ fun FritzDectApp(viewModel: FritzViewModel) {
     val isConnected by viewModel.isConnected.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
     val logs by viewModel.logs.collectAsState()
-    var showTerminal by remember { mutableStateOf(true) }
 
     var wasConnected by remember { mutableStateOf(false) }
     LaunchedEffect(isConnected) {
@@ -79,54 +74,34 @@ fun FritzDectApp(viewModel: FritzViewModel) {
             .fillMaxSize()
             .background(TheglinkyTheme.DarkBg)
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(
-                    brush = TheglinkyTheme.GradientBrush,
-                    shape = RoundedCornerShape(bottomStart = 16.dp, bottomEnd = 16.dp)
-                )
-                .padding(24.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                "THEGLINKY FRITZ!DECT",
-                fontSize = 26.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color.White,
-                fontFamily = FontFamily.Monospace
-            )
-        }
-
-        Box(
+        // Einfache, schlanke Status-Leiste statt grossem Header
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(TheglinkyTheme.CardBg)
-                .padding(16.dp)
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .size(12.dp)
-                            .background(
-                                color = if (isConnected) TheglinkyTheme.Cyan else Color.Gray,
-                                shape = RoundedCornerShape(50)
-                            )
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        if (isConnected) "Connected" else "Disconnected",
-                        color = if (isConnected) TheglinkyTheme.Cyan else Color.Gray,
-                        fontSize = 14.sp,
-                        fontFamily = FontFamily.Monospace
-                    )
-                }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(10.dp)
+                        .background(
+                            color = if (isConnected) TheglinkyTheme.Cyan else Color.Gray,
+                            shape = RoundedCornerShape(50)
+                        )
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    if (isConnected) "Connected" else "Disconnected",
+                    color = if (isConnected) TheglinkyTheme.Cyan else Color.Gray,
+                    fontSize = 14.sp,
+                    fontFamily = FontFamily.Monospace
+                )
+            }
 
+            if (currentScreen == Screen.Devices) {
                 Button(
                     onClick = { currentScreen = Screen.Setup },
                     colors = ButtonDefaults.buttonColors(
@@ -139,105 +114,24 @@ fun FritzDectApp(viewModel: FritzViewModel) {
             }
         }
 
-        // Terminal-Toggle-Leiste
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(Color(0xFF050810))
-                .padding(horizontal = 16.dp, vertical = 6.dp)
-                .let { it },
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                "> TERMINAL (${logs.size})",
-                color = Color(0xFF00FF66),
-                fontSize = 11.sp,
-                fontFamily = FontFamily.Monospace
-            )
-            Row {
-                TextButton(onClick = { viewModel.clearLogs() }) {
-                    Text("Clear", color = Color.Gray, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
-                }
-                TextButton(onClick = { showTerminal = !showTerminal }) {
-                    Text(
-                        if (showTerminal) "^ Verbergen" else "v Anzeigen",
-                        color = TheglinkyTheme.Cyan,
-                        fontSize = 10.sp,
-                        fontFamily = FontFamily.Monospace
-                    )
-                }
-            }
-        }
-
-        if (showTerminal) {
-            val listState = rememberLazyListState()
-            LaunchedEffect(logs.size) {
-                if (logs.isNotEmpty()) listState.animateScrollToItem(logs.size - 1)
-            }
-
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(180.dp)
-                    .background(Color(0xFF000000))
-                    .padding(1.dp)
-                    .background(Color(0xFF0A0A0A))
-            ) {
-                if (logs.isEmpty()) {
-                    Text(
-                        "// Noch keine Logs. Druecke CONNECT um zu starten.",
-                        color = Color(0xFF444444),
-                        fontSize = 11.sp,
-                        fontFamily = FontFamily.Monospace,
-                        modifier = Modifier.padding(12.dp)
-                    )
-                } else {
-                    LazyColumn(
-                        state = listState,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(2.dp)
-                    ) {
-                        items(logs) { entry ->
-                            val color = when (entry.level) {
-                                LogLevel.SUCCESS -> Color(0xFF00FF66)
-                                LogLevel.ERROR -> Color(0xFFFF3355)
-                                LogLevel.WARNING -> Color(0xFFFFC107)
-                                LogLevel.INFO -> Color(0xFF00D9FF)
-                            }
-                            val prefix = when (entry.level) {
-                                LogLevel.SUCCESS -> "[OK]"
-                                LogLevel.ERROR -> "[FEHLER]"
-                                LogLevel.WARNING -> "!"
-                                LogLevel.INFO -> ">"
-                            }
-                            Text(
-                                "[${entry.timestamp}] $prefix ${entry.message}",
-                                color = color,
-                                fontSize = 11.sp,
-                                fontFamily = FontFamily.Monospace,
-                                lineHeight = 14.sp
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
         when (currentScreen) {
-            Screen.Setup -> SetupScreen(viewModel, errorMessage) { currentScreen = Screen.Devices }
+            Screen.Setup -> SetupScreen(viewModel, errorMessage, logs) { currentScreen = Screen.Devices }
             Screen.Devices -> DevicesScreen(devices, viewModel, isConnected)
         }
     }
 }
 
 @Composable
-fun SetupScreen(viewModel: FritzViewModel, errorMessage: String, onConnected: () -> Unit) {
+fun SetupScreen(
+    viewModel: FritzViewModel,
+    errorMessage: String,
+    logs: List<LogEntry>,
+    onConnected: () -> Unit
+) {
     var fritzBoxIP by remember { mutableStateOf("") }
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
+    var passwordVisible by remember { mutableStateOf(false) }
     var isLoading by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
@@ -245,17 +139,15 @@ fun SetupScreen(viewModel: FritzViewModel, errorMessage: String, onConnected: ()
         modifier = Modifier
             .fillMaxSize()
             .padding(24.dp)
-            .verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally
+            .verticalScroll(rememberScrollState())
     ) {
         Text(
             "FRITZ!BOX SETUP",
-            fontSize = 20.sp,
+            fontSize = 18.sp,
             fontWeight = FontWeight.Bold,
             color = TheglinkyTheme.Cyan,
             fontFamily = FontFamily.Monospace,
-            modifier = Modifier.padding(bottom = 32.dp)
+            modifier = Modifier.padding(bottom = 24.dp)
         )
 
         OutlinedTextField(
@@ -264,41 +156,34 @@ fun SetupScreen(viewModel: FritzViewModel, errorMessage: String, onConnected: ()
             label = { Text("FRITZ!Box IP", color = TheglinkyTheme.Cyan) },
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(bottom = 16.dp),
+                .padding(bottom = 12.dp),
             colors = OutlinedTextFieldDefaults.colors(
                 focusedBorderColor = TheglinkyTheme.Cyan,
                 unfocusedBorderColor = TheglinkyTheme.Purple,
                 focusedTextColor = Color.White,
                 unfocusedTextColor = Color.White
-            ),
-            textStyle = androidx.compose.material3.LocalTextStyle.current.copy(
-                fontFamily = FontFamily.Monospace
             )
         )
 
         OutlinedTextField(
             value = username,
             onValueChange = { username = it },
-            label = { Text("FRITZ!Box Benutzername", color = TheglinkyTheme.Cyan) },
+            label = { Text("Benutzername", color = TheglinkyTheme.Cyan) },
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(bottom = 16.dp),
+                .padding(bottom = 12.dp),
             colors = OutlinedTextFieldDefaults.colors(
                 focusedBorderColor = TheglinkyTheme.Cyan,
                 unfocusedBorderColor = TheglinkyTheme.Purple,
                 focusedTextColor = Color.White,
                 unfocusedTextColor = Color.White
-            ),
-            textStyle = androidx.compose.material3.LocalTextStyle.current.copy(
-                fontFamily = FontFamily.Monospace
             )
         )
 
-        var passwordVisible by remember { mutableStateOf(false) }
         OutlinedTextField(
             value = password,
             onValueChange = { password = it },
-            label = { Text("FRITZ!Box Passwort", color = TheglinkyTheme.Cyan) },
+            label = { Text("Passwort", color = TheglinkyTheme.Cyan) },
             visualTransformation = if (passwordVisible) androidx.compose.ui.text.input.VisualTransformation.None else androidx.compose.ui.text.input.PasswordVisualTransformation(),
             trailingIcon = {
                 TextButton(onClick = { passwordVisible = !passwordVisible }) {
@@ -312,35 +197,14 @@ fun SetupScreen(viewModel: FritzViewModel, errorMessage: String, onConnected: ()
             },
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(bottom = 8.dp),
+                .padding(bottom = 20.dp),
             colors = OutlinedTextFieldDefaults.colors(
                 focusedBorderColor = TheglinkyTheme.Cyan,
                 unfocusedBorderColor = TheglinkyTheme.Purple,
                 focusedTextColor = Color.White,
                 unfocusedTextColor = Color.White
-            ),
-            textStyle = androidx.compose.material3.LocalTextStyle.current.copy(
-                fontFamily = FontFamily.Monospace
             )
         )
-
-        Text(
-            "Benutzername + Passwort findest du in der FRITZ!Box unter System -> FRITZ!Box-Benutzer",
-            fontSize = 11.sp,
-            color = Color.Gray,
-            fontFamily = FontFamily.Monospace,
-            modifier = Modifier.padding(bottom = 16.dp)
-        )
-
-        if (errorMessage.isNotEmpty()) {
-            Text(
-                errorMessage,
-                color = TheglinkyTheme.Pink,
-                fontSize = 12.sp,
-                modifier = Modifier.padding(bottom = 16.dp),
-                fontFamily = FontFamily.Monospace
-            )
-        }
 
         Button(
             onClick = {
@@ -348,7 +212,6 @@ fun SetupScreen(viewModel: FritzViewModel, errorMessage: String, onConnected: ()
                 scope.launch {
                     viewModel.connectToFritzBox(fritzBoxIP, password, username)
                     isLoading = false
-                    // Nur weiterleiten wenn Connect wirklich erfolgreich war
                     if (viewModel.isConnected.value) {
                         onConnected()
                     }
@@ -370,6 +233,64 @@ fun SetupScreen(viewModel: FritzViewModel, errorMessage: String, onConnected: ()
                 )
             } else {
                 Text("CONNECT", fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+            }
+        }
+
+        // Fehlermeldung direkt unter dem Button - einfach und klar
+        if (errorMessage.isNotEmpty()) {
+            Text(
+                errorMessage,
+                color = TheglinkyTheme.Pink,
+                fontSize = 13.sp,
+                fontFamily = FontFamily.Monospace,
+                modifier = Modifier.padding(top = 12.dp)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        // Terminal-Log ganz unten, dezent und einfach
+        if (logs.isNotEmpty()) {
+            val listState = rememberLazyListState()
+            LaunchedEffect(logs.size) {
+                listState.animateScrollToItem(logs.size - 1)
+            }
+
+            Text(
+                "Log",
+                color = Color.Gray,
+                fontSize = 12.sp,
+                fontFamily = FontFamily.Monospace,
+                modifier = Modifier.padding(bottom = 6.dp)
+            )
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(140.dp)
+                    .background(Color(0xFF050810), RoundedCornerShape(8.dp))
+                    .padding(10.dp)
+            ) {
+                LazyColumn(
+                    state = listState,
+                    verticalArrangement = Arrangement.spacedBy(3.dp)
+                ) {
+                    items(logs) { entry ->
+                        val color = when (entry.level) {
+                            LogLevel.SUCCESS -> Color(0xFF00FF66)
+                            LogLevel.ERROR -> Color(0xFFFF3355)
+                            LogLevel.WARNING -> Color(0xFFFFC107)
+                            LogLevel.INFO -> Color(0xFF888888)
+                        }
+                        Text(
+                            "${entry.timestamp}  ${entry.message}",
+                            color = color,
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace,
+                            lineHeight = 13.sp
+                        )
+                    }
+                }
             }
         }
     }
@@ -500,7 +421,7 @@ fun FritzDeviceCard(device: FritzDevice, viewModel: FritzViewModel) {
                         .padding(8.dp)
                 ) {
                     Text(
-                        "[T] Timer: ${device.timerInfo}",
+                        "Timer: ${device.timerInfo}",
                         fontSize = 11.sp,
                         color = TheglinkyTheme.Pink,
                         fontFamily = FontFamily.Monospace
@@ -517,7 +438,7 @@ fun FritzDeviceCard(device: FritzDevice, viewModel: FritzViewModel) {
                 ),
                 shape = RoundedCornerShape(8.dp)
             ) {
-                Text("[TIMER] TIMER EINSTELLEN", fontFamily = FontFamily.Monospace, fontSize = 12.sp)
+                Text("TIMER EINSTELLEN", fontFamily = FontFamily.Monospace, fontSize = 12.sp)
             }
         }
     }
