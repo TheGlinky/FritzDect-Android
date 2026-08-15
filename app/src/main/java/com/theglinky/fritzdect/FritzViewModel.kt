@@ -9,12 +9,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
-import okhttp3.Credentials
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.xmlpull.v1.XmlPullParser
 import org.xmlpull.v1.XmlPullParserFactory
 import java.io.StringReader
+import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -55,6 +55,7 @@ class FritzViewModel : ViewModel() {
     private var fritzBoxIP = ""
     private var fritzUser = ""
     private var fritzPassword = ""
+    private var sessionId = ""
 
     private var prefs: SharedPreferences? = null
 
@@ -109,6 +110,7 @@ class FritzViewModel : ViewModel() {
         prefs?.edit()?.clear()?.apply()
         _hasSavedCredentials.value = false
         _isConnected.value = false
+        sessionId = ""
         pollingJob?.cancel()
         log("Gespeicherte Zugangsdaten geloescht", LogLevel.WARNING)
     }
@@ -123,6 +125,15 @@ class FritzViewModel : ViewModel() {
             log("Verbinde zu $fritzBoxIP...", LogLevel.INFO)
 
             try {
+                log("Fordere Session an...", LogLevel.INFO)
+                sessionId = fetchSessionId()
+
+                if (sessionId.isEmpty() || sessionId == "0000000000000000") {
+                    throw Exception("Anmeldung fehlgeschlagen. Benutzername oder Passwort falsch.")
+                }
+
+                log("Session erhalten", LogLevel.SUCCESS)
+
                 val devices = fetchDeviceList()
                 log("${devices.size} Geraet(e) gefunden", LogLevel.SUCCESS)
                 _devices.emit(devices)
@@ -141,19 +152,66 @@ class FritzViewModel : ViewModel() {
         }
     }
 
-    private fun buildAuthHeader(): String? {
-        return if (fritzUser.isNotEmpty() && fritzPassword.isNotEmpty()) {
-            Credentials.basic(fritzUser, fritzPassword)
-        } else null
+    /**
+     * AVM Challenge-Response Login-Verfahren (login_sid.lua).
+     * Schritt 1: Challenge holen. Schritt 2: MD5(challenge-passwort) in UTF-16LE senden.
+     */
+    private fun fetchSessionId(): String {
+        // Schritt 1: Challenge holen
+        val challengeUrl = "http://$fritzBoxIP/login_sid.lua?version=2"
+        val challengeRequest = Request.Builder().url(challengeUrl).build()
+        val challengeResponse = httpClient.newCall(challengeRequest).execute()
+        val challengeXml = challengeResponse.body?.string() ?: throw Exception("Keine Antwort beim Challenge-Abruf.")
+
+        val challenge = extractXmlValue(challengeXml, "Challenge")
+        if (challenge.isEmpty()) {
+            throw Exception("Konnte Challenge nicht aus FRITZ!Box-Antwort lesen.")
+        }
+
+        // Schritt 2: Response berechnen (MD5 von "challenge-passwort", UTF-16LE)
+        val challengeResponseString = "$challenge-$fritzPassword"
+        val md5 = MessageDigest.getInstance("MD5")
+        val hashBytes = md5.digest(challengeResponseString.toByteArray(Charsets.UTF_16LE))
+        val hashHex = hashBytes.joinToString("") { "%02x".format(it) }
+        val response = "$challenge-$hashHex"
+
+        // Schritt 3: Login mit Response senden
+        val loginUrl = "http://$fritzBoxIP/login_sid.lua?version=2&username=$fritzUser&response=$response"
+        val loginRequest = Request.Builder().url(loginUrl).build()
+        val loginResponse = httpClient.newCall(loginRequest).execute()
+        val loginXml = loginResponse.body?.string() ?: throw Exception("Keine Antwort beim Login.")
+
+        return extractXmlValue(loginXml, "SID")
+    }
+
+    private fun extractXmlValue(xml: String, tagName: String): String {
+        val parser = XmlPullParserFactory.newInstance().newPullParser()
+        parser.setInput(StringReader(xml))
+        var eventType = parser.eventType
+        var inTag = false
+        var value = ""
+
+        while (eventType != XmlPullParser.END_DOCUMENT) {
+            when (eventType) {
+                XmlPullParser.START_TAG -> if (parser.name == tagName) inTag = true
+                XmlPullParser.TEXT -> if (inTag) value = parser.text?.trim() ?: ""
+                XmlPullParser.END_TAG -> if (parser.name == tagName) return value
+            }
+            eventType = parser.next()
+        }
+        return value
     }
 
     private suspend fun fetchDeviceList(): List<FritzDevice> {
-        val url = "http://$fritzBoxIP/webservices/homeautoswitch.lua?switchcmd=getdevicelistinfos"
-        val requestBuilder = Request.Builder().url(url)
-        buildAuthHeader()?.let { requestBuilder.addHeader("Authorization", it) }
+        if (sessionId.isEmpty()) {
+            sessionId = fetchSessionId()
+        }
+
+        val url = "http://$fritzBoxIP/webservices/homeautoswitch.lua?switchcmd=getdevicelistinfos&sid=$sessionId"
+        val request = Request.Builder().url(url).build()
 
         val response = try {
-            httpClient.newCall(requestBuilder.build()).execute()
+            httpClient.newCall(request).execute()
         } catch (e: java.net.ConnectException) {
             throw Exception("Keine Verbindung zu $fritzBoxIP moeglich. IP korrekt und im gleichen WLAN?")
         } catch (e: java.net.UnknownHostException) {
@@ -163,8 +221,21 @@ class FritzViewModel : ViewModel() {
         }
 
         if (response.code == 403) {
-            throw Exception("Zugriff verweigert. Benutzername/Passwort falsch oder keine Smart-Home-Berechtigung.")
+            // Session evtl. abgelaufen, einmal neu versuchen
+            log("Session evtl. abgelaufen, neu anmelden...", LogLevel.WARNING)
+            sessionId = fetchSessionId()
+            if (sessionId.isEmpty() || sessionId == "0000000000000000") {
+                throw Exception("Anmeldung fehlgeschlagen. Benutzername oder Passwort falsch.")
+            }
+            val retryUrl = "http://$fritzBoxIP/webservices/homeautoswitch.lua?switchcmd=getdevicelistinfos&sid=$sessionId"
+            val retryResponse = httpClient.newCall(Request.Builder().url(retryUrl).build()).execute()
+            if (!retryResponse.isSuccessful) {
+                throw Exception("HTTP ${retryResponse.code} von der FRITZ!Box (nach Session-Erneuerung).")
+            }
+            val xml = retryResponse.body?.string() ?: throw Exception("Leere Antwort von FRITZ!Box")
+            return parseDeviceListXml(xml)
         }
+
         if (!response.isSuccessful) {
             throw Exception("HTTP ${response.code} von der FRITZ!Box.")
         }
@@ -259,13 +330,13 @@ class FritzViewModel : ViewModel() {
 
     suspend fun toggleDevice(ain: String, turnOn: Boolean) {
         try {
+            if (sessionId.isEmpty()) {
+                sessionId = fetchSessionId()
+            }
+
             val cmd = if (turnOn) "setswitchon" else "setswitchoff"
-            val url = "http://$fritzBoxIP/webservices/homeautoswitch.lua?switchcmd=$cmd&ain=$ain"
-
-            val requestBuilder = Request.Builder().url(url)
-            buildAuthHeader()?.let { requestBuilder.addHeader("Authorization", it) }
-
-            val response = httpClient.newCall(requestBuilder.build()).execute()
+            val url = "http://$fritzBoxIP/webservices/homeautoswitch.lua?switchcmd=$cmd&ain=$ain&sid=$sessionId"
+            val response = httpClient.newCall(Request.Builder().url(url).build()).execute()
 
             if (response.isSuccessful) {
                 log("${if (turnOn) "Eingeschaltet" else "Ausgeschaltet"}: $ain", LogLevel.SUCCESS)
@@ -294,7 +365,7 @@ class FritzViewModel : ViewModel() {
         pollingJob = viewModelScope.launch(Dispatchers.IO) {
             while (true) {
                 try {
-                    kotlinx.coroutines.delay(3000)
+                    kotlinx.coroutines.delay(5000)
                     val devices = fetchDeviceList()
                     _devices.emit(devices)
                 } catch (e: Exception) {
