@@ -16,6 +16,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -37,6 +38,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         viewModel = ViewModelProvider(this).get(FritzViewModel::class.java)
+        viewModel.initAndAutoConnect(applicationContext)
 
         setContent {
             MaterialTheme {
@@ -60,6 +62,7 @@ fun FritzDectApp(viewModel: FritzViewModel) {
     val isConnected by viewModel.isConnected.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
     val logs by viewModel.logs.collectAsState()
+    val hasSavedCredentials by viewModel.hasSavedCredentials.collectAsState()
 
     var wasConnected by remember { mutableStateOf(false) }
     LaunchedEffect(isConnected) {
@@ -74,7 +77,6 @@ fun FritzDectApp(viewModel: FritzViewModel) {
             .fillMaxSize()
             .background(TheglinkyTheme.DarkBg)
     ) {
-        // Einfache, schlanke Status-Leiste statt grossem Header
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -115,7 +117,12 @@ fun FritzDectApp(viewModel: FritzViewModel) {
         }
 
         when (currentScreen) {
-            Screen.Setup -> SetupScreen(viewModel, errorMessage, logs) { currentScreen = Screen.Devices }
+            Screen.Setup -> SetupScreen(
+                viewModel,
+                errorMessage,
+                logs,
+                hasSavedCredentials
+            ) { currentScreen = Screen.Devices }
             Screen.Devices -> DevicesScreen(devices, viewModel, isConnected)
         }
     }
@@ -126,6 +133,7 @@ fun SetupScreen(
     viewModel: FritzViewModel,
     errorMessage: String,
     logs: List<LogEntry>,
+    hasSavedCredentials: Boolean,
     onConnected: () -> Unit
 ) {
     var fritzBoxIP by remember { mutableStateOf("") }
@@ -149,6 +157,34 @@ fun SetupScreen(
             fontFamily = FontFamily.Monospace,
             modifier = Modifier.padding(bottom = 24.dp)
         )
+
+        if (hasSavedCredentials) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(TheglinkyTheme.CardBg, RoundedCornerShape(8.dp))
+                    .padding(12.dp)
+            ) {
+                Column {
+                    Text(
+                        "Es sind bereits Zugangsdaten gespeichert.",
+                        color = TheglinkyTheme.Cyan,
+                        fontSize = 12.sp,
+                        fontFamily = FontFamily.Monospace
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    TextButton(onClick = { viewModel.forgetCredentials() }) {
+                        Text(
+                            "Gespeicherte Daten loeschen",
+                            color = TheglinkyTheme.Pink,
+                            fontSize = 12.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(20.dp))
+        }
 
         OutlinedTextField(
             value = fritzBoxIP,
@@ -197,7 +233,7 @@ fun SetupScreen(
             },
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(bottom = 20.dp),
+                .padding(bottom = 8.dp),
             colors = OutlinedTextFieldDefaults.colors(
                 focusedBorderColor = TheglinkyTheme.Cyan,
                 unfocusedBorderColor = TheglinkyTheme.Purple,
@@ -206,11 +242,19 @@ fun SetupScreen(
             )
         )
 
+        Text(
+            "Wird beim ersten erfolgreichen Verbinden gespeichert - danach automatischer Login.",
+            fontSize = 11.sp,
+            color = Color.Gray,
+            fontFamily = FontFamily.Monospace,
+            modifier = Modifier.padding(bottom = 20.dp)
+        )
+
         Button(
             onClick = {
                 isLoading = true
                 scope.launch {
-                    viewModel.connectToFritzBox(fritzBoxIP, password, username)
+                    viewModel.connectToFritzBox(fritzBoxIP, password, username, saveOnSuccess = true)
                     isLoading = false
                     if (viewModel.isConnected.value) {
                         onConnected()
@@ -236,7 +280,6 @@ fun SetupScreen(
             }
         }
 
-        // Fehlermeldung direkt unter dem Button - einfach und klar
         if (errorMessage.isNotEmpty()) {
             Text(
                 errorMessage,
@@ -249,7 +292,6 @@ fun SetupScreen(
 
         Spacer(modifier = Modifier.height(20.dp))
 
-        // Terminal-Log ganz unten, dezent und einfach
         if (logs.isNotEmpty()) {
             val listState = rememberLazyListState()
             LaunchedEffect(logs.size) {
@@ -295,7 +337,6 @@ fun SetupScreen(
         }
     }
 }
-
 @Composable
 fun DevicesScreen(devices: List<FritzDevice>, viewModel: FritzViewModel, isConnected: Boolean) {
     if (isConnected && devices.isEmpty()) {
