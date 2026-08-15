@@ -1,5 +1,7 @@
 package com.theglinky.fritzdect
 
+import android.content.Context
+import android.content.SharedPreferences
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -57,9 +59,14 @@ class FritzViewModel : ViewModel() {
     private val _logs = MutableStateFlow<List<LogEntry>>(emptyList())
     val logs: StateFlow<List<LogEntry>> = _logs
 
+    private val _hasSavedCredentials = MutableStateFlow(false)
+    val hasSavedCredentials: StateFlow<Boolean> = _hasSavedCredentials
+
     private var fritzBoxIP = ""
     private var fritzUser = ""
     private var fritzPassword = ""
+
+    private var prefs: SharedPreferences? = null
 
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
@@ -86,7 +93,43 @@ class FritzViewModel : ViewModel() {
         _logs.value = emptyList()
     }
 
-    fun connectToFritzBox(ip: String, password: String, user: String = "") {
+    /**
+     * Initialisiert die gespeicherten Zugangsdaten (aus MainActivity beim App-Start aufrufen).
+     * Wenn Daten vorhanden sind, wird automatisch verbunden.
+     */
+    fun initAndAutoConnect(context: Context) {
+        prefs = context.getSharedPreferences("fritz_prefs", Context.MODE_PRIVATE)
+
+        val savedIp = prefs?.getString("ip", "") ?: ""
+        val savedUser = prefs?.getString("user", "") ?: ""
+        val savedPassword = prefs?.getString("password", "") ?: ""
+
+        if (savedIp.isNotEmpty() && savedUser.isNotEmpty() && savedPassword.isNotEmpty()) {
+            _hasSavedCredentials.value = true
+            log("Gespeicherte Zugangsdaten gefunden, verbinde automatisch...", LogLevel.INFO)
+            connectToFritzBox(savedIp, savedPassword, savedUser, saveOnSuccess = false)
+        }
+    }
+
+    private fun saveCredentials(ip: String, user: String, password: String) {
+        prefs?.edit()
+            ?.putString("ip", ip)
+            ?.putString("user", user)
+            ?.putString("password", password)
+            ?.apply()
+        _hasSavedCredentials.value = true
+        log("Zugangsdaten gespeichert - naechstes Mal automatisch verbinden", LogLevel.INFO)
+    }
+
+    fun forgetCredentials() {
+        prefs?.edit()?.clear()?.apply()
+        _hasSavedCredentials.value = false
+        _isConnected.value = false
+        pollingJob?.cancel()
+        log("Gespeicherte Zugangsdaten geloescht", LogLevel.WARNING)
+    }
+
+    fun connectToFritzBox(ip: String, password: String, user: String = "", saveOnSuccess: Boolean = true) {
         fritzBoxIP = ip.trim()
         fritzPassword = password
         fritzUser = user.trim()
@@ -103,7 +146,7 @@ class FritzViewModel : ViewModel() {
                 log("Sende Anfrage: getdevicelistinfos", LogLevel.INFO)
                 val devices = fetchDeviceList()
 
-                log("Antwort erhalten, ${devices.size} Gerät(e) gefunden", LogLevel.SUCCESS)
+                log("Antwort erhalten, ${devices.size} Geraet(e) gefunden", LogLevel.SUCCESS)
                 _devices.emit(devices)
                 _isConnected.emit(true)
 
@@ -111,11 +154,16 @@ class FritzViewModel : ViewModel() {
                     log("Verbindung ok, aber keine FRITZ!DECT Steckdosen in der FRITZ!Box gefunden.", LogLevel.WARNING)
                 } else {
                     devices.forEach { d ->
-                        log("Gerät erkannt: ${d.name} (${d.ain}) - ${if (d.isOn) "AN" else "AUS"}", LogLevel.INFO)
+                        log("Geraet erkannt: ${d.name} (${d.ain}) - ${if (d.isOn) "AN" else "AUS"}", LogLevel.INFO)
                     }
                 }
 
-                log("Verbindung erfolgreich hergestellt ✓", LogLevel.SUCCESS)
+                log("Verbindung erfolgreich hergestellt", LogLevel.SUCCESS)
+
+                if (saveOnSuccess) {
+                    saveCredentials(fritzBoxIP, fritzUser, fritzPassword)
+                }
+
                 startPolling()
             } catch (e: Exception) {
                 log("FEHLER: ${e.javaClass.simpleName}: ${e.message}", LogLevel.ERROR)
@@ -140,11 +188,11 @@ class FritzViewModel : ViewModel() {
         val response = try {
             httpClient.newCall(requestBuilder.build()).execute()
         } catch (e: java.net.ConnectException) {
-            throw Exception("Keine Verbindung zu $fritzBoxIP möglich. Ist die IP korrekt und bist du im selben WLAN/VPN?")
+            throw Exception("Keine Verbindung zu $fritzBoxIP moeglich. Ist die IP korrekt und bist du im selben WLAN/VPN?")
         } catch (e: java.net.UnknownHostException) {
-            throw Exception("Adresse $fritzBoxIP nicht auflösbar. IP-Format prüfen (z.B. 192.168.178.1).")
+            throw Exception("Adresse $fritzBoxIP nicht aufloesbar. IP-Format pruefen (z.B. 192.168.178.1).")
         } catch (e: java.net.SocketTimeoutException) {
-            throw Exception("Zeitüberschreitung - FRITZ!Box antwortet nicht unter $fritzBoxIP.")
+            throw Exception("Zeitueberschreitung - FRITZ!Box antwortet nicht unter $fritzBoxIP.")
         }
 
         log("HTTP Status: ${response.code}", if (response.isSuccessful) LogLevel.INFO else LogLevel.ERROR)
@@ -258,7 +306,7 @@ class FritzViewModel : ViewModel() {
             val response = httpClient.newCall(requestBuilder.build()).execute()
 
             if (response.isSuccessful) {
-                log("Schalten erfolgreich (${response.code}) ✓", LogLevel.SUCCESS)
+                log("Schalten erfolgreich (${response.code})", LogLevel.SUCCESS)
                 updateDeviceState(ain, turnOn)
             } else {
                 log("Schalten fehlgeschlagen: HTTP ${response.code}", LogLevel.ERROR)
@@ -274,7 +322,7 @@ class FritzViewModel : ViewModel() {
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 timerConfigs[ain] = TimerConfig(ain, onMinutes, pauseHours, isRepeat)
-                log("Timer gestartet für $ain: ${onMinutes}min AN, ${pauseHours}h Pause, repeat=$isRepeat", LogLevel.INFO)
+                log("Timer gestartet fuer $ain: ${onMinutes}min AN, ${pauseHours}h Pause, repeat=$isRepeat", LogLevel.INFO)
 
                 toggleDevice(ain, true)
 
@@ -295,7 +343,7 @@ class FritzViewModel : ViewModel() {
                     kotlinx.coroutines.delay(onMillis)
                     toggleDevice(ain, false)
                     timerConfigs.remove(ain)
-                    log("Timer für $ain abgeschlossen ✓", LogLevel.SUCCESS)
+                    log("Timer fuer $ain abgeschlossen", LogLevel.SUCCESS)
                 }
             } catch (e: Exception) {
                 log("FEHLER im Timer: ${e.message}", LogLevel.ERROR)
@@ -305,7 +353,7 @@ class FritzViewModel : ViewModel() {
 
     fun cancelTimer(ain: String) {
         timerConfigs.remove(ain)
-        log("Timer für $ain abgebrochen", LogLevel.WARNING)
+        log("Timer fuer $ain abgebrochen", LogLevel.WARNING)
     }
 
     private suspend fun updateDeviceState(ain: String, isOn: Boolean) {
