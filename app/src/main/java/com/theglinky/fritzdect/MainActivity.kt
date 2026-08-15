@@ -161,7 +161,7 @@ fun FritzDectApp(viewModel: FritzViewModel) {
                 }
                 TextButton(onClick = { showTerminal = !showTerminal }) {
                     Text(
-                        if (showTerminal) "▲ Verbergen" else "▼ Anzeigen",
+                        if (showTerminal) "^ Verbergen" else "v Anzeigen",
                         color = TheglinkyTheme.Cyan,
                         fontSize = 10.sp,
                         fontFamily = FontFamily.Monospace
@@ -186,7 +186,7 @@ fun FritzDectApp(viewModel: FritzViewModel) {
             ) {
                 if (logs.isEmpty()) {
                     Text(
-                        "// Noch keine Logs. Drück CONNECT um zu starten.",
+                        "// Noch keine Logs. Druecke CONNECT um zu starten.",
                         color = Color(0xFF444444),
                         fontSize = 11.sp,
                         fontFamily = FontFamily.Monospace,
@@ -208,8 +208,8 @@ fun FritzDectApp(viewModel: FritzViewModel) {
                                 LogLevel.INFO -> Color(0xFF00D9FF)
                             }
                             val prefix = when (entry.level) {
-                                LogLevel.SUCCESS -> "✓"
-                                LogLevel.ERROR -> "✗"
+                                LogLevel.SUCCESS -> "[OK]"
+                                LogLevel.ERROR -> "[FEHLER]"
                                 LogLevel.WARNING -> "!"
                                 LogLevel.INFO -> ">"
                             }
@@ -325,7 +325,7 @@ fun SetupScreen(viewModel: FritzViewModel, errorMessage: String, onConnected: ()
         )
 
         Text(
-            "Benutzername + Passwort findest du in der FRITZ!Box unter System → FRITZ!Box-Benutzer",
+            "Benutzername + Passwort findest du in der FRITZ!Box unter System -> FRITZ!Box-Benutzer",
             fontSize = 11.sp,
             color = Color.Gray,
             fontFamily = FontFamily.Monospace,
@@ -485,7 +485,7 @@ fun FritzDeviceCard(device: FritzDevice, viewModel: FritzViewModel) {
                     fontFamily = FontFamily.Monospace
                 )
                 Text(
-                    "Temp: ${device.temperature}°C",
+                    "Temp: ${device.temperature} Grad C",
                     fontSize = 12.sp,
                     color = TheglinkyTheme.Cyan,
                     fontFamily = FontFamily.Monospace
@@ -500,7 +500,7 @@ fun FritzDeviceCard(device: FritzDevice, viewModel: FritzViewModel) {
                         .padding(8.dp)
                 ) {
                     Text(
-                        "⏱ Timer: ${device.timerInfo}",
+                        "[T] Timer: ${device.timerInfo}",
                         fontSize = 11.sp,
                         color = TheglinkyTheme.Pink,
                         fontFamily = FontFamily.Monospace
@@ -517,7 +517,7 @@ fun FritzDeviceCard(device: FritzDevice, viewModel: FritzViewModel) {
                 ),
                 shape = RoundedCornerShape(8.dp)
             ) {
-                Text("⏰ TIMER EINSTELLEN", fontFamily = FontFamily.Monospace, fontSize = 12.sp)
+                Text("[TIMER] TIMER EINSTELLEN", fontFamily = FontFamily.Monospace, fontSize = 12.sp)
             }
         }
     }
@@ -531,10 +531,103 @@ fun FritzDeviceCard(device: FritzDevice, viewModel: FritzViewModel) {
     }
 }
 
-@Composable
+
+Composable
 fun TimerDialog(device: FritzDevice, viewModel: FritzViewModel, onDismiss: () -> Unit) {
     var onMinutes by remember { mutableStateOf("10") }
     var pauseHours by remember { mutableStateOf("3") }
     var isRepeat by remember { mutableStateOf(false) }
 
-    A
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                "TIMER: ${device.name}",
+                color = TheglinkyTheme.Cyan,
+                fontFamily = FontFamily.Monospace,
+                fontSize = 16.sp
+            )
+        },
+        text = {
+            Column {
+                Text("AN-Dauer (Minuten)", color = TheglinkyTheme.Cyan, fontSize = 12.sp)
+                OutlinedTextField(
+                    value = onMinutes,
+                    onValueChange = { onMinutes = it },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 16.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        focusedBorderColor = TheglinkyTheme.Cyan
+                    )
+                )
+
+                Text("Pause-Dauer (Stunden)", color = TheglinkyTheme.Cyan, fontSize = 12.sp)
+                OutlinedTextField(
+                    value = pauseHours,
+                    onValueChange = { pauseHours = it },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 16.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        focusedBorderColor = TheglinkyTheme.Cyan
+                    )
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Checkbox(
+                        checked = isRepeat,
+                        onCheckedChange = { isRepeat = it },
+                        colors = CheckboxDefaults.colors(
+                            checkedColor = TheglinkyTheme.Pink,
+                            uncheckedColor = TheglinkyTheme.Purple
+                        )
+                    )
+                    Text(
+                        "Wiederholen",
+                        color = TheglinkyTheme.Cyan,
+                        fontSize = 14.sp,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+            }
+        },
+        containerColor = TheglinkyTheme.CardBg,
+        confirmButton = {
+            Button(
+                onClick = {
+                    viewModel.setTimer(
+                        device.ain,
+                        onMinutes.toIntOrNull() ?: 10,
+                        pauseHours.toIntOrNull() ?: 3,
+                        isRepeat
+                    )
+                    onDismiss()
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = TheglinkyTheme.Pink)
+            ) {
+                Text("START", fontFamily = FontFamily.Monospace)
+            }
+        },
+        dismissButton = {
+            Button(
+                onClick = onDismiss,
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2A3050))
+            ) {
+                Text("ABBRECHEN", fontFamily = FontFamily.Monospace)
+            }
+        }
+    )
+}
+
+sealed class Screen {
+    object Setup : Screen()
+    object Devices : Screen()
+}
